@@ -1,0 +1,17 @@
+# Game install (symlink) — never commit game files
+Remember Me
+
+# Reverse-engineering artefacts derived from the game binary (local only, never distribute)
+re/
+*.unpacked.exe
+*.gpr
+*.rep/
+
+# Third-party tools fetched locally
+tools/steamless/
+
+# RenderDoc captures (large, contain game assets)
+*.rdc
+
+# Build output
+build/
