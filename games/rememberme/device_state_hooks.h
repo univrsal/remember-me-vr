@@ -25,6 +25,9 @@ bool Install(IDirect3DDevice9* device, const Options& options);
 // Render thread: the viewport last set with SetViewport.
 const D3DVIEWPORT9& CurrentViewport();
 
+// Render thread: size of the 2D texture bound to sampler 0 (false if none).
+bool Stage0TextureSize(UINT& width, UINT& height);
+
 // Render thread: the first float register of a named constant (from the
 // shader's constant table) in the currently bound vertex/pixel shader, or -1
 // if the shader doesn't have it (or was created before the hooks).

@@ -93,6 +93,21 @@ constexpr uint8_t kDownsampleSceneDepthPrologueA[] = {0x55, 0x8B, 0xEC, 0x83, 0x
 constexpr uint32_t kDownsampleSceneDepthPrologueBOffset = 13;
 constexpr uint8_t kDownsampleSceneDepthPrologueB[] = {0x64, 0xA1, 0x00, 0x00, 0x00, 0x00, 0x50};
 
+// DrawDenormalizedQuad(X, Y, SizeX, SizeY, U, V, SizeU, SizeV, TargetSizeX,
+// TargetSizeY, TextureSizeX, TextureSizeY, Z): draws a quad covering
+// (X, Y, SizeX, SizeY) pixels of the current viewport, sampling (U, V, SizeU,
+// SizeV) texels of a TextureSize texture. cdecl, 13 args. Used for copies,
+// composites, blurs.
+using DrawDenormalizedQuadFn = void (*)(float x, float y, float sizeX, float sizeY, float u, float v, float sizeU,
+                                        float sizeV, uint32_t targetSizeX, uint32_t targetSizeY,
+                                        uint32_t textureSizeX, uint32_t textureSizeY, float z);
+constexpr uint32_t kDrawDenormalizedQuad = 0x00A35FC0;
+// Bytes 12..15 are the security cookie's address; check around them.
+constexpr uint8_t kDrawDenormalizedQuadPrologueA[] = {0x55, 0x8B, 0xEC, 0x83, 0xE4, 0xF0, 0x81, 0xEC, 0xB0, 0x00, 0x00,
+                                                       0x00, 0xA1};
+constexpr uint32_t kDrawDenormalizedQuadPrologueBOffset = 17;
+constexpr uint8_t kDrawDenormalizedQuadPrologueB[] = {0x33, 0xC4};
+
 // FSceneRenderer: TArray<FViewInfo> Views {data, num, max}; FViewInfo is inline, 0x1210 bytes.
 constexpr uint32_t kRendererViewsData = 0x5C;
 constexpr uint32_t kRendererViewsNum = 0x60;

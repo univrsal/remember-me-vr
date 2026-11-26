@@ -61,6 +61,7 @@ thread_local D3DVIEWPORT9 t_viewport{0, 0, 0, 0, 0.0f, 1.0f};
 thread_local bool t_trace = false;
 thread_local std::vector<float> t_scratch;
 thread_local std::shared_ptr<const ShaderConstants> t_vs, t_ps;
+thread_local IDirect3DBaseTexture9* t_stage0 = nullptr;  // identity only (bound, so alive)
 
 // Parses the CTAB comment of SM2/3 bytecode into float-register constants.
 ShaderConstants ParseConstantTable(const DWORD* code) {
@@ -182,6 +183,7 @@ HRESULT STDMETHODCALLTYPE HookSetViewport(IDirect3DDevice9* self, const D3DVIEWP
 }
 
 HRESULT STDMETHODCALLTYPE HookSetTexture(IDirect3DDevice9* self, DWORD stage, IDirect3DBaseTexture9* texture) {
+  if (stage == 0) t_stage0 = texture;
   if (t_trace && texture) {
     D3DSURFACE_DESC desc{};
     if (texture->GetType() == D3DRTYPE_TEXTURE &&
@@ -279,6 +281,15 @@ bool Install(IDirect3DDevice9* device, const Options& options) {
 void SetTrace(bool enabled) { t_trace = enabled; }
 
 const D3DVIEWPORT9& CurrentViewport() { return t_viewport; }
+
+bool Stage0TextureSize(UINT& width, UINT& height) {
+  if (!t_stage0 || t_stage0->GetType() != D3DRTYPE_TEXTURE) return false;
+  D3DSURFACE_DESC desc{};
+  if (FAILED(static_cast<IDirect3DTexture9*>(t_stage0)->GetLevelDesc(0, &desc))) return false;
+  width = desc.Width;
+  height = desc.Height;
+  return true;
+}
 int VertexShaderConstant(const char* name) { return FindConstant(t_vs, name); }
 int PixelShaderConstant(const char* name) { return FindConstant(t_ps, name); }
 

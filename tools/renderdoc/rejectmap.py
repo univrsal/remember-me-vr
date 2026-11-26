@@ -5,6 +5,7 @@
 rid_num = int(args[0])
 before, after = int(args[1]), int(args[2])
 step = int(args[3]) if len(args) > 3 else 8
+chan = int(args[6]) if len(args) > 6 else 0
 cells_x = int(args[4]) if len(args) > 4 else 96
 cells_y = int(args[5]) if len(args) > 5 else 40
 tex = next(t for t in ctl.GetTextures() if int(t.resourceId) == rid_num)
@@ -15,7 +16,7 @@ ys = range(step // 2, tex.height, step)
 
 def grab(eid):
     ctl.SetFrameEvent(eid, True)
-    return {(x, y): ctl.PickPixel(tex.resourceId, x, y, sub, rd.CompType.Typeless).floatValue[0]
+    return {(x, y): ctl.PickPixel(tex.resourceId, x, y, sub, rd.CompType.Typeless).floatValue[chan]
             for y in ys for x in xs}
 
 

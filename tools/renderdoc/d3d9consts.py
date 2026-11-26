@@ -30,7 +30,7 @@ for eid in eids:
         if refl is None:
             continue
         block = next((cb for cb in refl.constantBlocks if cb.name == "push_data"), None)
-        member = find_member(block.variables, "c") if block else None
+        member = (find_member(block.variables, "c") or find_member(block.variables, "cF")) if block else None
         if member is None:
             print("  %s: no push_data.c" % st)
             continue

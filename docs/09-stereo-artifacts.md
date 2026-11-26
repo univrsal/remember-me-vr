@@ -12,6 +12,7 @@ Status as of 2026-11-26. Stereo, depth, head tracking and resolution work (M3 pa
 | D | Sensen AR hints: left eye only, misplaced, follow head roll | left | **Second version built, untested in game:** per-eye redraw from the game camera (`[Stereo] SensenStereo`), see "Artifact D" below |
 | E | Loading screen shows the level around the tips panel | both | Needs loading detection |
 | F | Monitor mirror has no UI in stereo frames | — | Open |
+| G | Smoke particles cut off, depth fog with a hard mask | right | **Fix built, untested in game:** per-view scene-colour copy sampled the wrong region (below). `[Stereo] FixQuadTextureSize` |
 
 ## Reproduce and capture without VR
 
@@ -79,6 +80,15 @@ From `in_world_hint_stereo.rdc` (flat F10 test, 1880×2096 scene, SuperSampleCou
 - First try (2026-11-26, untested version 1873037): drew only the right eye with `C = inverse(TVP_left)…`, assumed client-memory composite tiles. Result: left hint misplaced (the game's), right hint drawn into the layer but never composited.
 
 Next: test in the flat F10 test (hints should appear in both halves at the right depth) and in VR (placement, head roll); check that DeProject-based things (e.g. aiming/targeting reticles, if any) still line up with the left eye.
+
+## Artifact G: smoke and fog masks (2026-11-26)
+
+`depth_fog_and_smoke_effect_weird_mask_stereo.rdc` (flat F10 test, 4736×2632): vent smoke cut off and a hard-edged mask in the depth fog, right eye only.
+
+- The smoke (`[vs.59e20dc] [fs.122d029]`, left EID 10248, right 11206) has correct per-eye constants (`DNEResolution` corrected, `ScreenPositionScaleBias` bias 0.75, per-eye view-projection and `LocalToWorld`) and the same geometry in both eyes. A scan of all right-eye draws' constants (`tools/renderdoc/scanconsts.py`) found nothing real: its hits were stale registers past each shader's constants (check against the CTAB).
+- **The depth it fades against is wrong.** Soft particles and fog read scene depth from the alpha of a scene-colour copy (9540). The scene colour (9541) is copied full-width before translucency (EIDs 9364, 9471); between the eyes' translucency the renderer copies **a sub-rectangle per view** (EIDs 10317 left, 10322 right: the screen bounds of a translucent primitive that needs scene colour, here eye pixels x 0–1904, y 1054–1917). Those copies use `DrawDenormalizedQuad` with **view-relative U/V and the viewport size as the texture size**: u = 0…0.804 (= pixel / 2368), while the texture is 4736 wide. Each copy therefore reads columns 0–3808 of the buffer, stretched over the rect. In the right eye the depth in that rect becomes stretched left-eye content (alpha 0.047 instead of 0.016, i.e. ~200 uu instead of ~650), so the smoke and fog fade against a wall that isn't there. The left eye's smoke ran before its bad copy, so it was unaffected.
+- **Fix (built, untested in game):** `[Stereo] FixQuadTextureSize=1` hooks `DrawDenormalizedQuad` (`FUN_00A35FC0`, cdecl, 13 args). When the texture size passed equals the viewport size, the viewport is offset or narrower than the texture bound to sampler 0, and that texture is larger, U/V get the viewport offset and the texture's real size is used. Mono (viewport covering the buffer's width) is unchanged. The log prints the first fix with its caller address.
+- Not found yet: the engine function doing the rect copy (a caller of `FUN_00A35FC0`; `FUN_00A5E880` is a candidate). The first log line's caller address will name it.
 
 ## Artifact B: notes
 
