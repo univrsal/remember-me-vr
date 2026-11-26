@@ -52,7 +52,8 @@ class Reflection {
   std::string FullName(uintptr_t object) const;
   uintptr_t FindObject(const std::string& fullName) const;
 
-  // Writes "index address fullname" for every live object. Returns the count, -1 on error.
+  // Writes "index address vt:+RVA fullname" for every live object (vtable as an
+  // exe RVA; "!" marks an absolute address outside the exe). Count, or -1 on error.
   int DumpObjects(const wchar_t* path) const;
 
   // Detects UField/UStruct/UProperty offsets. Requires Discover().

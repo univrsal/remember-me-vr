@@ -3,6 +3,7 @@
 
 #include "vrcore/log.h"
 #include "vrcore/memory.h"
+#include "vrcore/process.h"
 #include "vrcore/ue3.h"
 
 namespace vrcore::ue3 {
@@ -246,7 +247,12 @@ int Reflection::DumpObjects(const wchar_t* path) const {
   for (int32_t i = 0; i < count; ++i) {
     const uintptr_t object = Object(i);
     if (!object) continue;
-    std::fprintf(file, "%6d %08x %s\n", i, static_cast<unsigned>(object), FullName(object).c_str());
+    // vtable as an RVA of the exe (maps onto Ghidra addresses: preferred base + RVA).
+    const uintptr_t vtable = ReadPtr(object);
+    const uintptr_t base = reinterpret_cast<uintptr_t>(Exe().base);
+    const bool inExe = vtable >= base && vtable < base + Exe().imageSize;
+    std::fprintf(file, "%6d %08x vt:%c%08x %s\n", i, static_cast<unsigned>(object), inExe ? '+' : '!',
+                 static_cast<unsigned>(inExe ? vtable - base : vtable), FullName(object).c_str());
     ++written;
   }
   std::fclose(file);
