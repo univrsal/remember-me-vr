@@ -114,4 +114,7 @@ Both views land in the same family, so the renderer draws both eyes in one pass.
 - ~~How to create the second `FSceneViewState`~~: `AllocateViewState()` at `0x00A22B90`.
 - **A null `FSceneView::State` crashes the renderer.** `FSceneView` has `Family +0x0` and `State +0x4`. DONTNOD's motion-blur setup (`0x00A38B60`, reading `State+0x238`) doesn't null-check it, unlike stock UE3 paths, so every view needs a real view state.
 - What the projection-override object at `0x01647800+0x1AC+0x88` is, and when it exists.
-- Whether any DNE render pass breaks with two views in a family.
+- ~~Whether any DNE render pass breaks with two views in a family~~: **the 3D scene renders correctly in both views** (side-by-side test, 2026-11-26: lighting, fog, particles, DOF and post-process all per view, ~170 fps at 1880×2090). Only the UI misbehaves:
+  - **2D UI (Scaleform menus/HUD) is laid out in the first view's rectangle.** The pause menu was squeezed into the left half. The UI sizes itself from View[0]'s rect, not from `LocalPlayer.Origin/Size` (which we restore after `CalcSceneView`).
+  - **World-space AR hints are UI, not scene geometry.** E.g. "Caution: Leapers territory" is drawn in perspective but only in the left view, so it's projected with View[0]'s camera in the UI pass. That's why the GFx pass in the captures (07) runs with depth testing against scene depth.
+- Where the UI pass gets its viewport and projection (next: a RenderDoc capture with side-by-side on, then Ghidra).

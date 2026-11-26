@@ -43,8 +43,9 @@ Each milestone reduces the risk of the next one. **Milestone 3 is the go/no-go g
 - [x] Live `LocalPlayer`, `GameViewportClient`, `PlayerController`, `Camera` objects and their vtables identified
 - [x] Located in Ghidra: `UGameViewportClient::Draw` `0x0086D7F0`, `ULocalPlayer::CalcSceneView` `0x008622B0`, `ProcessEvent` `0x00458BA0`, `FPerspectiveMatrix` `0x008092B0`, `FSceneView` ctor `0x00A17F80`; `ViewState` at `LocalPlayer+0x8C`
 - [x] **Finding:** `CalcSceneView` adds its view to the family itself, so calling it twice per frame gives two views in one family (S2) through a single hook. See 08.
-- [ ] Logging hook on `CalcSceneView` to confirm argument order and call frequency
-- [ ] Find how UE3 allocates an `FSceneViewState` (for the second eye)
+- [x] Logging hook on `CalcSceneView`: argument order confirmed; one call per frame normally
+- [x] `AllocateViewState()` found (`0x00A22B90`); the right eye gets its own view state (a null one crashes DONTNOD's motion blur)
+- [x] **Side-by-side test works**: two views in one family, the 3D scene renders correctly in both, toggles on/off without problems. The UI only uses View[0] (see 08)
 - [ ] `ProcessEvent` hook
 - [ ] Prove control: change camera position and projection for one frame (flat screen)
 
