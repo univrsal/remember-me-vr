@@ -78,10 +78,12 @@ Replace "draw twice" with "two views in one family" inside the same hook points:
 Hooks on the `IDirect3DDevice9` vtable:
 
 - **`Present`:** eye capture and suppression (§2).
-- **HUD/menus (Scaleform GFx):**
-  - Find the GFx pass by its shaders (`GFx*Shader.bin`; record bytecode hashes from a capture with the HUD visible, see 07).
-  - Redirect GFx draws into a separate transparent RGBA render target. That becomes an **OpenXR quad layer** at a comfortable distance.
-  - Render it once per tick, not per eye.
+- **HUD/menus (Scaleform GFx + Canvas)**, per the UI captures in 07:
+  - Every frame ends with one fixed "copy scene → backbuffer" draw, then the UI draws.
+  - Hash shader bytecode at `CreateVertexShader`/`CreatePixelShader`, and recognise the copy draw by its shader pair.
+  - Take the eye image at that point.
+  - Redirect all later draws in the frame to a transparent RGBA HUD render target, with no depth buffer (or a cleared one). That becomes an **OpenXR quad layer** at a comfortable distance.
+  - Render the UI once per tick, not per eye: skip the UI draws during the first eye's draw.
 - **Bink FMVs:** detect the `BinkShaders` pass and show the frame on a quad layer (cinema mode). Pre-rendered video can't be stereo.
 
 ## 4. VR backend

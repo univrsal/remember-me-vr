@@ -10,8 +10,10 @@ Each milestone reduces the risk of the next one. **Milestone 3 is the go/no-go g
 - [x] Native function `{name, fn}` tables confirmed in the unpacked exe
 - [x] Mono fps baseline: ~180 fps at 1880×2090, `SuperSampleCount=1` (window clamped by monitor size; see 05 for resolution setup and 07 for the stereo estimate)
 - [ ] Check whether the baseline is GPU-bound (`DXVK_HUD=gpuload`), and measure a heavier scene
-- [ ] Captures with the HUD visible, the pause menu, and a cutscene (see 07)
-- [ ] Check whether the `~` console works in this shipping build
+- [x] Captures with the HUD visible, menus, Combo Lab, item pickup, voice-comm overlay, cutscene (see 07)
+- [ ] Captures of a Bink FMV and a Memory Remix sequence
+- [x] Check the `~` console: **does not open** in this shipping build (the INI already binds `ConsoleKey=Tilde`, so the console object probably isn't created; see M2)
+- [ ] Re-measure the baseline at lower settings (the 180 fps figure was at maximum settings)
 - [ ] Import the unpacked exe into Ghidra; label the native tables with a script
 - [ ] Decompile the camera/HUD/LocalPlayer classes from `ExampleGame.upk`, `Adrift.upk` and `Engine.upk` with UE Explorer
 
@@ -28,6 +30,7 @@ Each milestone reduces the risk of the next one. **Milestone 3 is the go/no-go g
 - [ ] `GNames`/`GObjects` located; object/class/property dump
 - [ ] Live `LocalPlayer`, `GameViewportClient`, `PlayerController` and `Camera` objects, and their vtables, identified
 - [ ] `ProcessEvent` hook
+- [ ] Re-enable the console: construct the console object (`ExampleGame.ExampleConsole`) and assign it to `GameViewportClient.ViewportConsole`, the usual UE3 console-unlocker approach. Independently, call the engine's console-command `Exec` path directly from the mod. The port itself issues `SETRES` through it, so that path is live in the shipping build. Some cheat/debug commands may be compiled out.
 - [ ] Locate in Ghidra: the viewport draw call site (`FViewport::Draw` / `UGameViewportClient::Draw`), `ULocalPlayer::CalcSceneView`, `ULocalPlayer::ViewState` offset, and the view-state allocator
 - [ ] Prove control: overwrite camera POV and projection for one frame (flat screen)
 
@@ -66,9 +69,9 @@ Each milestone reduces the risk of the next one. **Milestone 3 is the go/no-go g
 
 ## Open questions
 
-1. Does the shipping build accept console commands? It would make iteration much faster.
-2. Reversed-Z or standard depth? It affects the projection override.
-3. Where is the GFx HUD drawn: straight into the backbuffer, or via an intermediate target? (Needs a capture with the HUD on.)
+1. Which console commands survive in the shipping build? The UI console doesn't open, but the exec path is live (see M2).
+2. Reversed-Z or standard depth? It affects the projection override. Captures point to standard depth (see 07); confirm from the projection constants.
+3. ~~Where is the GFx HUD drawn?~~ Answered: straight into the backbuffer, after one fixed scene-copy draw (see 07). Still open: are any UI elements deliberately depth-tested against the world?
 4. Does `FViewport::Draw` have a `bShouldPresent` parameter in this build?
 5. Are the 2048² shadow maps per-light (shareable between eyes) or view-fitted cascades?
 6. Which OpenXR runtime is the target? SteamVR for now; test Monado/WiVRn later.
