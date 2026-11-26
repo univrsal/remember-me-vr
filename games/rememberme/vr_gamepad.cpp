@@ -28,6 +28,8 @@ std::mutex g_mutex;  // XInput may be polled from more than one thread
 XINPUT_GAMEPAD g_last{};
 DWORD g_packet = 0;
 bool g_grip[2] = {false, false};
+uint64_t g_nextLogMs = 0;
+SHORT g_loggedSticks[4] = {};
 
 SHORT Axis(float v) {
   v = std::clamp(v, -1.0f, 1.0f);
@@ -100,6 +102,19 @@ DWORD WINAPI HookGetState(DWORD user, XINPUT_STATE* state) {
   if (std::memcmp(&pad, &g_last, sizeof(pad)) != 0) {
     g_last = pad;
     ++g_packet;
+  }
+  // Diagnostics: what the game gets, when the sticks change (at most 2x/s).
+  const SHORT sticks[4] = {pad.sThumbLX, pad.sThumbLY, pad.sThumbRX, pad.sThumbRY};
+  bool moved = false;
+  for (int i = 0; i < 4; ++i) moved = moved || std::abs(sticks[i] - g_loggedSticks[i]) > 6000;
+  const uint64_t now = GetTickCount64();
+  if (moved && now >= g_nextLogMs) {
+    g_nextLogMs = now + 500;
+    std::memcpy(g_loggedSticks, sticks, sizeof(sticks));
+    VR_LOG_INFO("vr gamepad: to game L %d,%d R %d,%d buttons 0x%04x (real pad %s: L %d,%d R %d,%d)", pad.sThumbLX,
+                pad.sThumbLY, pad.sThumbRX, pad.sThumbRY, pad.wButtons, result == ERROR_SUCCESS ? "present" : "absent",
+                result == ERROR_SUCCESS ? state->Gamepad.sThumbLX : 0, result == ERROR_SUCCESS ? state->Gamepad.sThumbLY : 0,
+                result == ERROR_SUCCESS ? state->Gamepad.sThumbRX : 0, result == ERROR_SUCCESS ? state->Gamepad.sThumbRY : 0);
   }
   state->dwPacketNumber = g_packet;
   state->Gamepad = pad;
