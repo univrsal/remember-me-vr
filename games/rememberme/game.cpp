@@ -91,13 +91,23 @@ class RememberMe final : public vrcore::Game {
     }
     if (ue3Discover_ && !reflection_.Valid() && reflection_.Discover()) {
       reflection_.DiscoverTypes();
-      int32_t offset = -1;
-      uint32_t mask = 0;
-      if (engineHooksInstalled_ &&
-          reflection_.BoolProperty("Class ExampleGame.ExamplePlayerController", "bOnLoadingScreen", offset, mask)) {
-        sceneViews_.SetLoadingScreenFlag(offset, mask);
-      } else if (engineHooksInstalled_) {
-        VR_LOG_WARN("ExamplePlayerController.bOnLoadingScreen not found; loading screens stay stereo");
+      if (engineHooksInstalled_) {
+        const struct {
+          const char* property;
+          const char* name;
+          bool enabled;
+        } flags[] = {{"bOnLoadingScreen", "loading screen", sceneViews_.FlatLoadingScreens()},
+                     {"bMenuPause", "menu", sceneViews_.FlatMenus()}};
+        for (const auto& f : flags) {
+          int32_t offset = -1;
+          uint32_t mask = 0;
+          if (!f.enabled) continue;
+          if (reflection_.BoolProperty("Class ExampleGame.ExamplePlayerController", f.property, offset, mask)) {
+            sceneViews_.AddFlatFlag(f.name, offset, mask);
+          } else {
+            VR_LOG_WARN("ExamplePlayerController.%s not found; %ss stay stereo", f.property, f.name);
+          }
+        }
       }
       if (ue3DumpOnStart_) DumpObjects("start");
     }

@@ -5,6 +5,8 @@
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <string>
+#include <vector>
 
 #include "engine.h"
 #include "sensen_stereo.h"
@@ -56,11 +58,17 @@ struct State {
 
   EyeOverride eye;
 
-  // Loading screens: render mono while the controller's flag is set.
+  // Render mono while one of these controller bools is set (loading screens,
+  // menus).
   bool flatLoadingScreens = true;
-  int32_t loadingOffset = -1;
-  uint32_t loadingMask = 0;
-  bool wasLoading = false;
+  bool flatMenus = true;
+  struct FlatFlag {
+    std::string name;
+    int32_t offset = -1;
+    uint32_t mask = 0;
+    bool was = false;
+  };
+  std::vector<FlatFlag> flatFlags;
 
   // The last per-frame stereo call's left eye, reused (as one view, without a
   // new stereo frame) for calls that build temporary view families.
@@ -151,15 +159,24 @@ void __fastcall HookPovLookAt(void* pov, void* /*edx*/, float lx, float ly, floa
   }
 }
 
-bool OnLoadingScreen(void* localPlayer) {
-  if (!g.flatLoadingScreens || g.loadingOffset < 0) return false;
+// True if any flat flag is set on the player's controller (logs changes).
+bool FlatFrame(void* localPlayer) {
+  if (g.flatFlags.empty()) return false;
   uintptr_t controller = 0;
-  uint32_t word = 0;
-  if (!vrcore::mem::Read(reinterpret_cast<uintptr_t>(localPlayer) + kLocalPlayerActor, controller) || !controller ||
-      !vrcore::mem::Read(controller + static_cast<uint32_t>(g.loadingOffset), word)) {
+  if (!vrcore::mem::Read(reinterpret_cast<uintptr_t>(localPlayer) + kLocalPlayerActor, controller) || !controller) {
     return false;
   }
-  return (word & g.loadingMask) != 0;
+  bool any = false;
+  for (auto& f : g.flatFlags) {
+    uint32_t word = 0;
+    const bool set = vrcore::mem::Read(controller + static_cast<uint32_t>(f.offset), word) && (word & f.mask) != 0;
+    if (set != f.was) {
+      f.was = set;
+      VR_LOG_INFO("%s %s: %s", f.name.c_str(), set ? "on" : "off", set ? "rendering mono (flat panel in VR)" : "done");
+    }
+    any = any || set;
+  }
+  return any;
 }
 
 void* RightEyeState(void* leftState) {
@@ -219,11 +236,7 @@ void* __fastcall HookCalcSceneView(void* self, void* /*edx*/, void* family, FVec
   void* const viewState = Field<void*>(self, kLocalPlayerViewState);
   const int32_t viewsBefore = ViewCount(family);
 
-  const bool loading = !matricesOnly && OnLoadingScreen(self);
-  if (loading != g.wasLoading) {
-    g.wasLoading = loading;
-    VR_LOG_INFO("loading screen %s: %s", loading ? "on" : "off", loading ? "rendering mono (flat panel in VR)" : "stereo again");
-  }
+  const bool loading = !matricesOnly && FlatFrame(self);
 
   vrcore::StereoFrame frame;
   const bool vr = !matricesOnly && !loading && g.vrStereo && g.compositor && g.compositor->BeginStereoFrame(frame);
@@ -348,6 +361,7 @@ void SceneViewHooks::Configure(const vrcore::Config& config, vrcore::Compositor*
   g.logFirstCalls = config.GetInt("Stereo", "LogFirstCalls", g.logFirstCalls);
   g.logEvery = config.GetInt("Stereo", "LogEvery", g.logEvery);
   g.flatLoadingScreens = config.GetBool("VR", "FlatLoadingScreens", true);
+  g.flatMenus = config.GetBool("VR", "FlatMenus", true);
   toggleKey_ = config.GetInt("Stereo", "ToggleKey", 0x79);  // F10
 }
 
@@ -395,12 +409,13 @@ bool SceneViewHooks::Install() {
   return ok;
 }
 
-void SceneViewHooks::SetLoadingScreenFlag(int32_t offset, uint32_t mask) {
-  g.loadingOffset = offset;
-  g.loadingMask = mask;
-  VR_LOG_INFO("loading-screen flag at controller +0x%x mask 0x%x%s", offset, mask,
-              g.flatLoadingScreens ? "" : " (FlatLoadingScreens off)");
+void SceneViewHooks::AddFlatFlag(const char* name, int32_t offset, uint32_t mask) {
+  g.flatFlags.push_back({name, offset, mask, false});
+  VR_LOG_INFO("flat panel while %s (controller +0x%x mask 0x%x)", name, offset, mask);
 }
+
+bool SceneViewHooks::FlatLoadingScreens() const { return g.flatLoadingScreens; }
+bool SceneViewHooks::FlatMenus() const { return g.flatMenus; }
 
 void SceneViewHooks::ToggleSideBySide() {
   const bool now = !g.sideBySide.load();

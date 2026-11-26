@@ -2,6 +2,7 @@
 
 #include "vrcore/compositor.h"
 #include <cstdint>
+#include <string>
 
 #include "vrcore/config.h"
 
@@ -28,11 +29,14 @@ class SceneViewHooks {
   // Thread-safe toggle (called from the render-thread key poll).
   void ToggleSideBySide();
 
-  // Where the player controller's "on loading screen" bool lives
-  // (ExamplePlayerController.bOnLoadingScreen, from reflection). While it's
-  // set, frames render mono, so VR shows the flat panel (the tips screen as on
-  // a monitor) instead of the half-streamed level around the player.
-  void SetLoadingScreenFlag(int32_t offset, uint32_t mask);
+  // A player-controller bool (word offset and bit, from reflection) during
+  // which frames render mono, so VR shows the flat panel: loading screens
+  // (bOnLoadingScreen: the tips screen as on a monitor instead of the
+  // half-streamed level) and menus (bMenuPause: the pause/Sensen menus' 3D
+  // backdrop is made for the game's FOV). `name` is for the log.
+  void AddFlatFlag(const char* name, int32_t offset, uint32_t mask);
+  bool FlatLoadingScreens() const;
+  bool FlatMenus() const;
   int ToggleKey() const { return toggleKey_; }
 
  private:

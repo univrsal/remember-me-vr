@@ -12,6 +12,7 @@ Status as of 2026-11-26. Stereo, depth, head tracking and resolution work (M3 pa
 | D | Sensen AR hints: left eye only, misplaced, follow head roll | left | **Fixed** (confirmed in game 2026-11-26, flat test): per-eye redraw from the game camera, both views composited (`[Stereo] SensenStereo`), see "Artifact D" below |
 | E | Loading screen shows the level around the tips panel | both | **Fixed** (confirmed in game 2026-11-26): mono (flat panel) while `ExamplePlayerController.bOnLoadingScreen` is set (`[VR] FlatLoadingScreens`), see below |
 | F | Monitor mirror has no UI in stereo frames | — | **Fixed** (confirmed in game 2026-11-26): UI drawn into the window too, window shows the left eye in VR (`[VR] MirrorUi`, `MirrorView`), see below |
+| H | Pause/Sensen menu backdrop is a white disc in blue; Combo Lab UI on an opaque black panel (VR only) | both | **Built, untested in game:** menus on the flat panel (`[VR] FlatMenus`), see below |
 | G | Smoke particles cut off, depth fog with a hard mask | right | **Fixed** (confirmed in game 2026-11-26, flat test, f90a807): per-view scene-colour copy sampled the wrong region (below). `[Stereo] FixQuadTextureSize` |
 
 ## Reproduce and capture without VR
@@ -108,6 +109,13 @@ In stereo frames every UI draw goes to the UI texture (its own VR panel), so the
 **Fix (confirmed in game 2026-11-26):**
 - `[VR] MirrorUi=1` (`vrcore::scene_tap::EnableUiMirror`): each redirected UI draw is drawn a second time into the backbuffer, where the game put it (the left view's rect), with the game's own blending (the premultiplied-alpha patch only applies to the UI texture). The F10 flat test shows its UI again too.
 - `[VR] MirrorView=left|stereo` (`games/rememberme/mirror.cpp`): while VR runs in stereo (`Compositor::StereoActive()` and a two-view frame), `left` rearranges the backbuffer after the compositor has copied the eyes: the left half (left eye + UI) is copied to a temporary surface, the backbuffer cleared to black and the left half put back centred (pillarboxed; `StretchRect`/`ColorFill` ignore the game's state). `stereo` keeps both eyes. Mono frames and the F10 test are unchanged.
+
+## Artifact H: menus (2026-11-26)
+
+- **Pause/Sensen menu backdrop** (`pause_menu_blue.rdc`): the menu's background is a 3D scene, a white cloudy backdrop object around the camera, rendered per eye, with the blue clear colour wherever it doesn't reach. It fills the screen at the game's FOV; with the headset's much wider FOV the edges show (a white disc in blue). The UI itself is fine.
+- **Combo Lab black panel, VR only** (`combo_lab.rdc`, F10 test, but the UI texture the VR panel would get is in the capture): the UI texture's alpha is opaque everywhere but the character silhouette. The cause is tile composites (`[vs.83471f9] [fs.c63bd4a]`, e.g. EID 9461, a full-size layer onto the screen) that blend **`One` / `SrcAlpha`**: their alpha is *transmittance* (1 = see-through). scene_tap's UI-texture alpha patch assumes *coverage* (`A = As + Ad·(1−As)`), so every see-through tile made the texture opaque, with black colour. On the monitor the game's own blending is right. (RenderDoc's `BlendMultiplier` 6 = `SrcAlpha`, 7 = `InvSrcAlpha`.)
+- A UI texture that tracks transmittance (`T' = T · f`, f = the draw's destination factor) handles those tiles but not blend-off draws (Scaleform clears its stage with a blend-off full-screen draw writing (0,0,0,0), which needs `T = 1 − As`); each convention misses one case without extra passes. Not done.
+- **Built, untested in game:** `[VR] FlatMenus=1`: while `ExamplePlayerController.bMenuPause` is set, frames render mono (like loading screens: the same mechanism, now a list of controller flags), so menus are on the flat panel as on a monitor and never use the UI texture. The log prints "menu on/off".
 
 ## Artifact B: notes
 
