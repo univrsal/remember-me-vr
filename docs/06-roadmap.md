@@ -26,8 +26,14 @@ Each milestone reduces the risk of the next one. **Milestone 3 is the go/no-go g
   - D3D9 calls come from **UE3's render thread**: the device is created on the main thread and presented from another.
   - Device flags `0x142` (FPU_PRESERVE | HARDWARE_VERTEXPROCESSING | DISABLE_DRIVER_MANAGEMENT), **not** `MULTITHREADED`. DXVK's `LockDevice` is therefore a no-op, so all interop and VR submission must run on the render thread, inside our D3D9 hooks.
   - Backbuffer 1880×2089, `D3DFMT_X8R8G8B8`, swap effect `COPY`, 1 back buffer. `Direct3DCreate9` is called twice (same object).
-- [ ] OpenXR instance and session on DXVK's device; copy the backbuffer into a quad layer
-- **Exit criteria:** stable for 30+ minutes, no extension or device-lost errors. Answers whether DXVK + wineopenxr interop works in a 32-bit process. If it doesn't, try the OpenVR fallback.
+- [x] OpenXR instance and session on DXVK's device; copy the backbuffer into a quad layer (`vrcore::VirtualScreen`). Verified 2026-11-26 with the Proton smoke test: SteamVR/OpenXR 2.18.4, session reaches FOCUSED, `B8G8R8A8_SRGB` swapchain with a bit-exact copy. Findings:
+  - **32-bit runtime manifest needed.** A 32-bit game's wineopenxr uses Proton's 32-bit native OpenXR loader, which reads `~/.config/openxr/1/active_runtime.i686.json` first and otherwise falls back to SteamVR's 64-bit runtime ("wrong ELF class"). SteamVR ships a 32-bit `bin/vrclient.so` and `steamxr_linux32.json`; `tools/setup-openxr-i686.sh` writes the i686 manifest with an absolute path.
+  - **Proton only sets up VR for Steam launches.** Its `steam.exe` helper writes the `HKCU\Software\Wine\VR` state that wineopenxr waits for only when `SteamGameId` is set. The smoke test sets it.
+  - **SteamVR must be running before the game.** DXVK asks wineopenxr for the required Vulkan extensions when it creates its instance.
+  - **No OpenXR teardown at process exit.** The D3D9/DXVK device is already gone by then, and destroying the session makes the runtime submit to a dead queue and crash.
+  - **Copy stall.** The copy waits for the GPU per frame (`WaitForResource` + fence). Simple and correct; replace with semaphores/timeline later if it costs too much.
+- [ ] Verify in the real game: comfortable 30-minute session, recenter, Reset (resolution change)
+- **Exit criteria:** stable for 30+ minutes, no extension or device-lost errors. ~~Answers whether DXVK + wineopenxr interop works in a 32-bit process.~~ **Answered: yes**, given the i686 runtime manifest.
 
 ## M2 — Engine access
 

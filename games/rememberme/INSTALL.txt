@@ -1,8 +1,8 @@
 Remember Me VR mod (work in progress)
 =====================================
 
-This build doesn't render in VR yet. It loads into the game and writes a log;
-it's meant for testing.
+This build shows the game on a flat virtual screen in VR (no stereo yet).
+It's meant for testing.
 
 Install
 -------
@@ -15,6 +15,21 @@ Binaries/, Engine/ and ExampleGame/). The files go to:
 Linux (Proton): set the game's Steam launch options to
 
   WINEDLLOVERRIDES="dinput8=n,b" %command%
+
+Linux also needs, once per user, a 32-bit OpenXR runtime manifest for
+SteamVR. Create ~/.config/openxr/1/active_runtime.i686.json containing
+(adjust the path to your SteamVR install):
+
+  {
+    "file_format_version": "1.0.0",
+    "runtime": {
+      "name": "SteamVR",
+      "VALVE_runtime_is_steamvr": true,
+      "library_path": "/home/<you>/.local/share/Steam/steamapps/common/SteamVR/bin/vrclient.so"
+    }
+  }
+
+Start SteamVR before the game. F8 recenters the screen.
 
 Windows: the mod needs DXVK's 32-bit d3d9.dll in Binaries/Win32 for VR output
 (https://github.com/doitsujin/dxvk/releases). Without it, it only logs.

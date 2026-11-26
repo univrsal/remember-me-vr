@@ -29,6 +29,8 @@ Headers and libs to vendor (git submodules or FetchContent):
   `PROTON_LOG=1` writes `~/steam-228300.log`. Our DLL should write its own log file next to the exe as well.
 - Use a deploy script that copies the built DLL into `Remember Me/Binaries/Win32/` (via the symlink). Gitignore the game folder; it already is.
 - SteamVR must be running before the game starts so the OpenXR/OpenVR bridges find it.
+- One-time setup for 32-bit OpenXR on Linux: `tools/setup-openxr-i686.sh` (see 06, M1 findings).
+- Testing the VR path without the game: `tools/smoke-test.sh --proton --frames 900` (needs SteamVR running).
 
 ## Setting the resolution
 

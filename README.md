@@ -28,6 +28,7 @@ tests/smoke_host.cpp      stand-in game exe for testing a build under Wine
 tools/deploy.sh           install/uninstall into the game folder
 tools/smoke-test.sh       run the smoke host under Wine with the built mod
 tools/package.sh          zip a build for release (used by CI)
+tools/setup-openxr-i686.sh  one-time: let 32-bit OpenXR apps use SteamVR on Linux
 .github/workflows/        CI: build + package on push/PR, release on v* tags
 cmake/                    mingw toolchain file, vrcore_add_mod() helper
 docs/                     evaluation, architecture, roadmap, capture analysis
@@ -55,6 +56,14 @@ tools/smoke-test.sh --dxvk ~/.local/share/Steam/steamapps/compatdata/228300/pfx/
 
 This runs `tests/smoke_host.exe`, renamed to `RememberMe.exe`, in a throwaway Wine prefix (`~/.cache/vrmod-smoke`). It checks export forwarding, the D3D9 hook chain, Present/Reset and, with `--dxvk`, the DXVK interop query. It prints `PASS` and the mod's log.
 
+With SteamVR running, the full VR path can be tested under Proton without the game:
+
+```sh
+tools/smoke-test.sh --proton --frames 900   # colour-cycling panel in the headset for ~10 s
+```
+
+This uses Proton Experimental in its own prefix under `~/.cache/vrmod-smoke` and sets `SteamGameId` like a Steam launch; Proton only sets up VR for Steam launches.
+
 ## Installing into the game
 
 ```sh
@@ -68,6 +77,13 @@ Steam launch options (Proton):
 ```
 WINEDLLOVERRIDES="dinput8=n,b" %command%
 ```
+
+For VR on Linux, two more things are needed:
+
+1. **Once per user:** `tools/setup-openxr-i686.sh`. SteamVR's default OpenXR runtime manifest points at its 64-bit library, which a 32-bit game's Proton OpenXR bridge can't load ("wrong ELF class"). The script writes `~/.config/openxr/1/active_runtime.i686.json`, pointing 32-bit clients at SteamVR's 32-bit `bin/vrclient.so`. 64-bit apps are unaffected; `--remove` undoes it.
+2. **Every session:** start SteamVR *before* the game. DXVK asks the runtime for its Vulkan extensions when the game creates its device.
+
+Press F8 (configurable) to recenter the screen.
 
 The log is written to `Binaries/Win32/RememberMeVR.log`. Set `[Core] Enabled=0` in the INI to turn the mod into a plain pass-through proxy.
 
@@ -108,4 +124,5 @@ zlib; see [LICENSE](LICENSE). Game files and anything derived from the game bina
 
 - [MinHook](https://github.com/TsudaKageyu/minhook): BSD 2-clause (fetched at build time)
 - [Vulkan-Headers](https://github.com/KhronosGroup/Vulkan-Headers): Apache-2.0 / MIT (fetched at build time)
+- [OpenXR-SDK](https://github.com/KhronosGroup/OpenXR-SDK) headers: Apache-2.0 (fetched at build time; vrcore negotiates with the runtime itself, no loader is linked)
 - `core/include/vrcore/dxvk_interop.h` is trimmed from [DXVK](https://github.com/doitsujin/dxvk) (zlib)

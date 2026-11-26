@@ -29,7 +29,12 @@ FetchContent_Declare(vulkan_headers
   GIT_TAG        v1.4.369
   GIT_SHALLOW    TRUE
   SOURCE_SUBDIR  _fetch_only)
-FetchContent_MakeAvailable(minhook vulkan_headers)
+FetchContent_Declare(openxr_sdk
+  GIT_REPOSITORY https://github.com/KhronosGroup/OpenXR-SDK.git
+  GIT_TAG        release-1.1.65
+  GIT_SHALLOW    TRUE
+  SOURCE_SUBDIR  _fetch_only)
+FetchContent_MakeAvailable(minhook vulkan_headers openxr_sdk)
 
 add_library(minhook STATIC
   ${minhook_SOURCE_DIR}/src/buffer.c
@@ -41,6 +46,12 @@ target_include_directories(minhook PUBLIC ${minhook_SOURCE_DIR}/include)
 add_library(vulkan_headers INTERFACE)
 target_include_directories(vulkan_headers SYSTEM INTERFACE ${vulkan_headers_SOURCE_DIR}/include)
 target_compile_definitions(vulkan_headers INTERFACE VK_NO_PROTOTYPES)
+
+# Headers only: vrcore negotiates with the OpenXR runtime itself (see
+# core/src/xr/runtime_loader.cpp) instead of linking Khronos' loader.
+add_library(openxr_headers INTERFACE)
+target_include_directories(openxr_headers SYSTEM INTERFACE ${openxr_sdk_SOURCE_DIR}/include)
+target_compile_definitions(openxr_headers INTERFACE XR_NO_PROTOTYPES XR_USE_GRAPHICS_API_VULKAN XR_USE_PLATFORM_WIN32)
 
 include(cmake/vrcore.cmake)
 

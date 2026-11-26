@@ -109,6 +109,7 @@ HRESULT STDMETHODCALLTYPE HookCreateDevice(IDirect3D9* self, UINT adapter, D3DDE
 
   IDirect3DDevice9* device = *out;
   HookDevice(device);
+  CaptureDxvkInstanceExtensions(self);
 
   DxvkInterop interop;
   const bool onDxvk = QueryDxvkInterop(device, interop);

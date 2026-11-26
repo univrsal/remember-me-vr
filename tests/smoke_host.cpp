@@ -6,6 +6,7 @@
 // CreateDevice -> Present hooks, and device Reset.
 
 #include <cstdio>
+#include <cstdlib>
 
 #include <windows.h>
 #include <unknwn.h>
@@ -26,7 +27,9 @@ int Fail(const char* what, long code = 0) {
 
 }  // namespace
 
-int main() {
+// Usage: smoke_host.exe [frames]   (default 4; use more to let an OpenXR session start)
+int main(int argc, char** argv) {
+  const int frames = argc > 1 ? std::atoi(argv[1]) : 4;
   // Same order as the game: the proxy is a load-time import there; here we load it first.
   HMODULE dinput = LoadLibraryW(L"dinput8.dll");
   if (!dinput) return Fail("LoadLibrary(dinput8.dll)", GetLastError());
@@ -59,8 +62,10 @@ int main() {
   if (FAILED(hr) || !device) return Fail("CreateDevice", hr);
   std::printf("ok: device created\n");
 
-  for (int i = 0; i < 3; ++i) {
-    device->Clear(0, nullptr, D3DCLEAR_TARGET, D3DCOLOR_XRGB(0, 64, 128), 1.0f, 0);
+  // Cycle the clear colour so a virtual screen visibly updates.
+  for (int i = 0; i < frames - 1; ++i) {
+    const int t = i % 180;
+    device->Clear(0, nullptr, D3DCLEAR_TARGET, D3DCOLOR_XRGB(t, 64, 255 - t), 1.0f, 0);
     hr = device->Present(nullptr, nullptr, nullptr, nullptr);
     if (FAILED(hr)) return Fail("Present", hr);
   }
@@ -68,7 +73,7 @@ int main() {
   if (FAILED(hr)) return Fail("Reset", hr);
   hr = device->Present(nullptr, nullptr, nullptr, nullptr);
   if (FAILED(hr)) return Fail("Present after Reset", hr);
-  std::printf("ok: 4 presents, 1 reset\n");
+  std::printf("ok: %d presents, 1 reset\n", frames);
 
   device->Release();
   d3d->Release();
