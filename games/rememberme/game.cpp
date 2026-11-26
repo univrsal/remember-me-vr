@@ -61,6 +61,8 @@ class RememberMe final : public vrcore::Game {
     disableMotionBlur_ = config.GetBool("VR", "DisableMotionBlur", true);
     sceneViews_.Configure(config, vrEnabled_ ? &compositor_ : nullptr);
     rm::vr_gamepad::Configure(config, vrEnabled_ ? &compositor_ : nullptr);
+    // As early as possible: the game may look for gamepads before the device exists.
+    rm::vr_gamepad::Install(/*early=*/true);
     rm::renderer_hooks::Configure(config);
     rm::sensen_stereo::Configure(config);
     rm::draw_fixes::Configure(config);

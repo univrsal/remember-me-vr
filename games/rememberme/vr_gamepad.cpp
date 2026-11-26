@@ -23,6 +23,7 @@ vrcore::Compositor* g_compositor = nullptr;
 bool g_enabled = true;
 float g_gripThreshold = 0.5f;
 bool g_loggedUse = false;
+bool g_loggedConnected = false;
 
 std::mutex g_mutex;  // XInput may be polled from more than one thread
 XINPUT_GAMEPAD g_last{};
@@ -95,7 +96,21 @@ DWORD WINAPI HookGetState(DWORD user, XINPUT_STATE* state) {
   const DWORD result = g_origGetState(user, state);
   if (!g_enabled || user != 0 || !state || !g_compositor) return result;
   const vrcore::xr::ControllerState controllers = g_compositor->Controllers();
-  if (!controllers.active) return result;
+  if (!controllers.active) {
+    if (result == ERROR_SUCCESS) return result;  // a real gamepad: as is
+    // Report player 0 as connected from the start: the game only reads a
+    // gamepad's sticks if one was connected when it looked (buttons alone
+    // seem to work regardless), and the VR controllers only become active
+    // once the OpenXR session runs. Neutral state until then.
+    std::lock_guard<std::mutex> lock(g_mutex);
+    std::memset(state, 0, sizeof(*state));
+    state->dwPacketNumber = g_packet;
+    if (!g_loggedConnected) {
+      g_loggedConnected = true;
+      VR_LOG_INFO("vr gamepad: reporting player 0 as a connected gamepad (VR controllers not active yet)");
+    }
+    return ERROR_SUCCESS;
+  }
   std::lock_guard<std::mutex> lock(g_mutex);
   XINPUT_GAMEPAD pad = FromControllers(controllers);
   if (result == ERROR_SUCCESS) Merge(pad, state->Gamepad);
@@ -144,9 +159,10 @@ void Configure(const vrcore::Config& config, vrcore::Compositor* compositor) {
   g_gripThreshold = config.GetFloat("Input", "GripThreshold", g_gripThreshold);
 }
 
-void Install() {
+void Install(bool early) {
   if (!g_enabled || !g_compositor || g_origGetState) return;
   HMODULE xinput = GetModuleHandleW(L"xinput1_3.dll");
+  if (!xinput && early) return;  // DllMain: no LoadLibrary; try again later
   if (!xinput) xinput = LoadLibraryW(L"xinput1_3.dll");
   if (!xinput) {
     VR_LOG_WARN("vr gamepad: xinput1_3.dll not loaded; VR controllers off");
@@ -160,7 +176,8 @@ void Install() {
                                         reinterpret_cast<void**>(&g_origGetState)) &&
                   vrcore::hook::Install("XInputSetState", setState, reinterpret_cast<void*>(&HookSetState),
                                         reinterpret_cast<void**>(&g_origSetState));
-  VR_LOG_INFO("vr gamepad %s", ok ? "installed (VR controllers act as player 0's gamepad)" : "FAILED");
+  VR_LOG_INFO("vr gamepad %s%s", ok ? "installed (VR controllers act as player 0's gamepad)" : "FAILED",
+              early ? " at attach" : "");
 }
 
 }  // namespace rm::vr_gamepad
