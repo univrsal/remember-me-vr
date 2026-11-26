@@ -22,7 +22,8 @@ struct Options {
 
 bool Install(IDirect3DDevice9* device, const Options& options);
 
-// Render thread: the viewport last set with SetViewport.
+// Render thread: the device's current viewport (read back from the device;
+// SetRenderTarget resets it without a SetViewport call).
 const D3DVIEWPORT9& CurrentViewport();
 
 // Render thread: size of the 2D texture bound to sampler 0 (false if none).

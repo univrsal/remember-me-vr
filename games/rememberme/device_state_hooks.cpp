@@ -57,7 +57,21 @@ std::atomic<bool> g_installed{false};
 std::atomic<uint64_t> g_fixedCount{0};
 
 // Render-thread state.
+// The device's actual viewport, read back when needed: SetRenderTarget resets
+// the viewport to the whole new target without a SetViewport call, so tracking
+// SetViewport alone goes stale.
+IDirect3DDevice9* g_device = nullptr;
+constexpr size_t kGetViewport = 48;
 thread_local D3DVIEWPORT9 t_viewport{0, 0, 0, 0, 0.0f, 1.0f};
+
+const D3DVIEWPORT9& ReadViewport() {
+  using GetViewport_t = HRESULT(STDMETHODCALLTYPE*)(IDirect3DDevice9*, D3DVIEWPORT9*);
+  if (g_device) {
+    D3DVIEWPORT9 vp{};
+    if (SUCCEEDED((*reinterpret_cast<GetViewport_t**>(g_device))[kGetViewport](g_device, &vp))) t_viewport = vp;
+  }
+  return t_viewport;
+}
 thread_local bool t_trace = false;
 thread_local std::vector<float> t_scratch;
 thread_local std::shared_ptr<const ShaderConstants> t_vs, t_ps;
@@ -147,7 +161,7 @@ bool IsDneResolution(const float* v, float w, float h) {
 
 // Returns the constants to upload: `data` itself, or a patched copy.
 const float* FixConstants(const float* data, UINT count, const char* stage, UINT reg) {
-  const D3DVIEWPORT9& vp = t_viewport;
+  const D3DVIEWPORT9& vp = ReadViewport();
   if (!g_options.fixDneResolution || !data || (vp.X == 0 && vp.Y == 0) || vp.Width == 0 || vp.Height == 0) {
     return data;
   }
@@ -255,6 +269,7 @@ HRESULT STDMETHODCALLTYPE HookSetPixelShaderConstantF(IDirect3DDevice9* self, UI
 
 bool Install(IDirect3DDevice9* device, const Options& options) {
   if (g_installed.exchange(true)) return true;
+  g_device = device;
   g_options = options;
   using vrcore::hook::InstallVTable;
   bool ok = InstallVTable("IDirect3DDevice9::SetViewport", device, kSetViewport, &HookSetViewport, &g_origSetViewport);
@@ -280,7 +295,7 @@ bool Install(IDirect3DDevice9* device, const Options& options) {
 
 void SetTrace(bool enabled) { t_trace = enabled; }
 
-const D3DVIEWPORT9& CurrentViewport() { return t_viewport; }
+const D3DVIEWPORT9& CurrentViewport() { return ReadViewport(); }
 
 bool Stage0TextureSize(UINT& width, UINT& height) {
   if (!t_stage0 || t_stage0->GetType() != D3DRTYPE_TEXTURE) return false;
