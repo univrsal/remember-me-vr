@@ -62,7 +62,8 @@ Each milestone reduces the risk of the next one. **Milestone 3 is the go/no-go g
   - Second test: resolution via the scene image works (4736×2628 at `SuperSampleCount=2`, window 2368×1314, ~140 fps).
   - **Right-eye puddle reflections** show a flat band (`puddle_red_band_stereo.rdc`); not yet located (see 08).
   - Sensen AR hints follow head roll and are misplaced (they use the game camera; part of the per-eye Sensen work).
-- [ ] Verify the fixes in the headset: head tracking in game, resolution via SuperSampleCount, recenter, frame pacing
+- [x] Third test: **head tracking works in game**. Stereo, depth, resolution OK. Some choppiness on Linux (seen in other games there too); recheck on Windows. Mod-side suspects if it persists: the per-frame GPU wait before the copy, and the one-period pose prediction.
+- **M3 passed (2026-11-26): synchronous stereo works.**
 - [ ] Tune defaults: world scale, camera orientation mode
 - **Exit criteria:** correct, comfortable stereo while walking and fighting in one chapter, at the HMD's refresh rate or with stable reprojection. Both eyes always from the same tick.
 - **Go/no-go:** S2 (two views per family) is implemented; if it proves unusable in the headset, fall back to S1 (draw the viewport twice per tick). Shader-level stereo is the very last thing to consider (see 03).
