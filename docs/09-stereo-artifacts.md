@@ -6,9 +6,9 @@ Status as of 2026-11-26. Stereo, depth, head tracking and resolution work (M3 pa
 
 | # | Artifact | Eyes | Status |
 |---|---|---|---|
-| A | Light/fog effect cut by horizontal bands (thickness varies with view angle) | right only | **Cause found, fix built (untested in game):** `DNEResolution` ignores the view offset (below). `[Stereo] FixDNEResolution` |
+| A | Light/fog effect cut by horizontal bands (thickness varies with view angle) | right only | **Fixed** (confirmed in game 2026-11-26, flat test): `DNEResolution` ignored the view offset (below). `[Stereo] FixDNEResolution` |
 | B | Character shadow offset horizontally, opposite directions per eye (not under the feet) | both, mirrored | Reproduces in the flat F10 test with `TestFov` when symmetric projection is off. Not yet analysed in a capture |
-| C | Blue/shadow wedge on Nilin; puddle reflection band | right | Likely the same cause as A (any material using `DNEResolution` in the right eye); recheck with the fix |
+| C | Blue/shadow wedge on Nilin; puddle reflection band | right | Probably the same cause as A: no water-reflection issues seen with the fix (2026-11-26, brief flat test). Recheck the wedge on Nilin and puddles in VR |
 | D | Sensen AR hints: left eye only, misplaced, follow head roll | left | Needs the per-eye Sensen work (see 08) |
 | E | Loading screen shows the level around the tips panel | both | Needs loading detection |
 | F | Monitor mirror has no UI in stereo frames | — | Open |
@@ -39,7 +39,7 @@ Found in `lighting_band_artifact.rdc` (flat F10 test, 4736×2632) with the scrip
 - The SPIR-V (`fs.2392be5…spv`, `spirv-dis`): `ndc = (FragCoord − 0.5)·c0.xy + c0.zw`, `uv = ndc/w · c1.xy + c1.wz`, `sceneDepth = c2.x / (SceneColor(uv).a − c2.y)`, `fade = saturate((sceneDepth − w) / 160)`, output = fog colour · fade, additive.
 - `DNEResolution` is bound for every material shader in `FUN_0096DB10` (DONTNOD's additions to the material parameters: `CameraWorldPos` +0x0, `DNEResolution` +0x6, `TemporalAAParameters` +0xC, …). The function that fills it wasn't found yet.
 
-**Fix (built, not yet tested in game):** `[Stereo] FixDNEResolution=1` (`games/rememberme/device_state_hooks.cpp`). When a vertex- or pixel-shader constant equals (2/W, −2/H, −1, 1) for the current viewport W×H and the viewport doesn't start at 0,0, its z/w become −1 − 2X/W and 1 + 2Y/H. Mono frames and the left eye are untouched. A cleaner fix would patch the engine's setter once it's found.
+**Fix (confirmed in game 2026-11-26):** `[Stereo] FixDNEResolution=1` (`games/rememberme/device_state_hooks.cpp`). When a vertex- or pixel-shader constant equals (2/W, −2/H, −1, 1) for the current viewport W×H and the viewport doesn't start at 0,0, its z/w become −1 − 2X/W and 1 + 2Y/H. Mono frames and the left eye are untouched. A cleaner fix would patch the engine's setter once it's found.
 
 ### Earlier wrong lead: the half-res depth downsample
 
@@ -56,8 +56,8 @@ The previous localisation to pass 61 (`FUN_00A60D30`, `DownsampleSceneDepth`) wa
 
 ### Next steps
 
-1. Test `FixDNEResolution=1` in the flat F10 test and in VR at the light-shaft spot; compare with `=0`. The log prints one "DNEResolution fix active" line on the first rewrite.
-2. Recheck artifact C (wedge on Nilin, puddle band) with the fix on.
+1. ~~Test `FixDNEResolution=1`~~: bands gone in the flat test. Still to do: a longer VR run.
+2. Recheck artifact C (wedge on Nilin, puddle band) in VR; no reflection issues seen so far.
 3. Optional: find the engine function that fills `DNEResolution` (it reads the material parameter at +0x6 of the struct bound in `FUN_0096DB10`) and add the view offset there instead.
 
 ## Artifact B: notes
