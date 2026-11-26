@@ -3,6 +3,7 @@
 #include <cinttypes>
 
 #include "depth_downsample_diag.h"
+#include "device_state_hooks.h"
 #include "scene_view_hooks.h"
 #include "vrcore/compositor.h"
 #include "vrcore/game.h"
@@ -50,6 +51,7 @@ class RememberMe final : public vrcore::Game {
     engineHooks_ = config.GetBool("Stereo", "EngineHooks", true);
     sceneViews_.Configure(config, vrEnabled_ ? &compositor_ : nullptr);
     rm::depth_downsample_diag::Configure(config);
+    deviceState_.fixDneResolution = config.GetBool("Stereo", "FixDNEResolution", true);
     VR_LOG_INFO("VR %s: mode %s, screen fallback %.1f m wide at %.1f m, recenter key 0x%02x",
                 vrEnabled_ ? "on" : "off", vr.mode == vrcore::Compositor::Mode::Stereo ? "stereo" : "screen",
                 vr.screenWidth, vr.screenDistance, vr.recenterKey);
@@ -66,7 +68,12 @@ class RememberMe final : public vrcore::Game {
     if (engineHooks_ && !engineHooksInstalled_) {
       if (knownBuild_) {
         engineHooksInstalled_ = sceneViews_.Install();
-        rm::depth_downsample_diag::Install(device);
+        // Stereo fixes at the D3D9 level (right-eye view offset) and the
+        // per-eye diagnostics that trace through the same hooks.
+        if (engineHooksInstalled_ && (deviceState_.fixDneResolution || rm::depth_downsample_diag::Enabled())) {
+          rm::device_state::Install(device, deviceState_);
+          rm::depth_downsample_diag::Install();
+        }
       } else {
         VR_LOG_WARN("engine hooks skipped: unknown game build");
       }
@@ -130,6 +137,7 @@ class RememberMe final : public vrcore::Game {
   bool engineHooksInstalled_ = false;
   bool sbsKeyDown_ = false;
   rm::SceneViewHooks sceneViews_;
+  rm::device_state::Options deviceState_;
   bool vrEnabled_ = true;
   vrcore::Compositor compositor_;
   int presentLogInterval_ = 0;

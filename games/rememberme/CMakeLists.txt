@@ -1,6 +1,6 @@
 vrcore_add_mod(RememberMeVR
   PROXY dinput8
-  SOURCES game.cpp scene_view_hooks.cpp depth_downsample_diag.cpp)
+  SOURCES game.cpp scene_view_hooks.cpp depth_downsample_diag.cpp device_state_hooks.cpp)
 
 # Ship the default config next to the DLL in the build tree.
 add_custom_command(TARGET RememberMeVR POST_BUILD
