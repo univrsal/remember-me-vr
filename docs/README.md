@@ -1,6 +1,6 @@
 # Remember Me VR — evaluation
 
-Evaluation done 2026-11-25. This looks at whether a VR mod for *Remember Me* (DONTNOD, 2013, Steam app 228300) is feasible, and how to build one.
+Evaluation done 2026-11-25. For building and running the mod itself, see the [root README](../README.md). This looks at whether a VR mod for *Remember Me* (DONTNOD, 2013, Steam app 228300) is feasible, and how to build one.
 
 | Doc | Contents |
 |---|---|

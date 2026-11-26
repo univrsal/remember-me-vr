@@ -19,9 +19,10 @@ Each milestone reduces the risk of the next one. **Milestone 3 is the go/no-go g
 
 ## M1 — VR plumbing (test harness, not a product)
 
-- [ ] Repo skeleton: CMake + mingw-w64 i686, `dinput8` proxy, logger, MinHook, deploy script
-- [ ] `CreateDevice` hook → device vtable → `Present`
-- [ ] `QueryInterface(ID3D9VkInteropDevice)`; log the Vulkan handles
+- [x] Repo skeleton: CMake + mingw-w64 i686, `dinput8` proxy, logger, INI config, MinHook, deploy script, Wine smoke test. Split into a reusable `core/` and `games/rememberme/` (see the root `README.md`)
+- [x] `Direct3DCreate9` → `CreateDevice` → device/swapchain `Present` and `Reset` hooks (verified under Wine with wined3d and with Proton's DXVK `d3d9.dll`)
+- [x] `QueryInterface(ID3D9VkInteropDevice)`; log the Vulkan handles (verified with DXVK in the smoke test)
+- [ ] Same checks in the real game under Proton (`tools/deploy.sh install`, then read `RememberMeVR.log`)
 - [ ] OpenXR instance and session on DXVK's device; copy the backbuffer into a quad layer
 - **Exit criteria:** stable for 30+ minutes, no extension or device-lost errors. Answers whether DXVK + wineopenxr interop works in a 32-bit process. If it doesn't, try the OpenVR fallback.
 

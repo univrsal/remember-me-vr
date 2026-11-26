@@ -1,0 +1,28 @@
+{
+  "version": 6,
+  "configurePresets": [
+    {
+      "name": "mingw-i686-base",
+      "hidden": true,
+      "generator": "Ninja",
+      "toolchainFile": "${sourceDir}/cmake/mingw-i686.cmake",
+      "binaryDir": "${sourceDir}/build/${presetName}"
+    },
+    {
+      "name": "mingw-i686-debug",
+      "inherits": "mingw-i686-base",
+      "displayName": "mingw-w64 i686, Debug",
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "Debug" }
+    },
+    {
+      "name": "mingw-i686-release",
+      "inherits": "mingw-i686-base",
+      "displayName": "mingw-w64 i686, RelWithDebInfo",
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "RelWithDebInfo" }
+    }
+  ],
+  "buildPresets": [
+    { "name": "mingw-i686-debug",   "configurePreset": "mingw-i686-debug" },
+    { "name": "mingw-i686-release", "configurePreset": "mingw-i686-release" }
+  ]
+}
