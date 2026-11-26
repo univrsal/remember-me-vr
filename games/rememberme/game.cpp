@@ -2,6 +2,7 @@
 
 #include <cinttypes>
 
+#include "depth_downsample_diag.h"
 #include "scene_view_hooks.h"
 #include "vrcore/compositor.h"
 #include "vrcore/game.h"
@@ -48,12 +49,13 @@ class RememberMe final : public vrcore::Game {
     ue3DumpKey_ = config.GetInt("UE3", "DumpObjectsKey", 0x78);  // F9
     engineHooks_ = config.GetBool("Stereo", "EngineHooks", true);
     sceneViews_.Configure(config, vrEnabled_ ? &compositor_ : nullptr);
+    rm::depth_downsample_diag::Configure(config);
     VR_LOG_INFO("VR %s: mode %s, screen fallback %.1f m wide at %.1f m, recenter key 0x%02x",
                 vrEnabled_ ? "on" : "off", vr.mode == vrcore::Compositor::Mode::Stereo ? "stereo" : "screen",
                 vr.screenWidth, vr.screenDistance, vr.recenterKey);
   }
 
-  void OnDeviceCreated(IDirect3DDevice9*, const D3DPRESENT_PARAMETERS& params,
+  void OnDeviceCreated(IDirect3DDevice9* device, const D3DPRESENT_PARAMETERS& params,
                        const vrcore::DxvkInterop* dxvk) override {
     VR_LOG_INFO("game device: backbuffer %ux%u, %u buffer(s), swap effect %d, %s",
                 params.BackBufferWidth, params.BackBufferHeight, params.BackBufferCount, params.SwapEffect,
@@ -64,6 +66,7 @@ class RememberMe final : public vrcore::Game {
     if (engineHooks_ && !engineHooksInstalled_) {
       if (knownBuild_) {
         engineHooksInstalled_ = sceneViews_.Install();
+        rm::depth_downsample_diag::Install(device);
       } else {
         VR_LOG_WARN("engine hooks skipped: unknown game build");
       }
@@ -84,7 +87,10 @@ class RememberMe final : public vrcore::Game {
     }
     if (engineHooksInstalled_ && sceneViews_.ToggleKey()) {
       const bool down = (GetAsyncKeyState(sceneViews_.ToggleKey()) & 0x8000) != 0;
-      if (down && !sbsKeyDown_) sceneViews_.ToggleSideBySide();
+      if (down && !sbsKeyDown_) {
+        sceneViews_.ToggleSideBySide();
+        rm::depth_downsample_diag::Rearm();
+      }
       sbsKeyDown_ = down;
     }
     if (vrEnabled_) {

@@ -6,7 +6,7 @@ Status as of 2026-11-26. Stereo, depth, head tracking and resolution work (M3 pa
 
 | # | Artifact | Eyes | Status |
 |---|---|---|---|
-| A | Light/fog effect cut by horizontal bands (thickness varies with view angle) | right only | **Localised to the half-res depth downsample (below)**, cause not found |
+| A | Light/fog effect cut by horizontal bands (thickness varies with view angle) | right only | **Localised to the half-res depth downsample** (`FUN_00A60D30`, below); per-eye logging added, cause not found |
 | B | Character shadow offset horizontally, opposite directions per eye (not under the feet) | both, mirrored | Reproduces in the flat F10 test with `TestFov` when symmetric projection is off. Not yet analysed in a capture |
 | C | Blue/shadow wedge on Nilin; puddle reflection band | right | Probably the same family as A; not yet checked against the half-res depth |
 | D | Sensen AR hints: left eye only, misplaced, follow head roll | left | Needs the per-eye Sensen work (see 08) |
@@ -54,11 +54,16 @@ Remaining suspect: **the pixel-shader constants of the right-eye draw** (the two
 ### Where the code is (Ghidra, `0x00400000` base)
 
 - Shader class constructor `FUN_00a2b7e0` (vtable `0x013a0580`, size 0xC0, binds `ProjectionScaleBias`, `SourceTexelOffsets01/23`, plus the base `FUN_00a28c10`: `SceneColorTexture`, `MinZ_MaxZRatio`, `ScreenPositionScaleBias`, …). It's created by `FUN_00a36d90` (registered from static init code around `0x0120284b`).
-- **Not yet found:** the `SetParameters` function that fills the constants, and the caller that draws the quad. The function neighbours of `0xa2bbb0..0xa2c800` scanned so far aren't it.
+- **Found (2026-11-26): `FUN_00A60D30` is `DownsampleSceneDepth`** (renderer in ECX; called from `FUN_00A81590+639`). Route: the name string `L"FDownsampleSceneDepthPixelShader"` → its static init `0x0120282D` → type object `0x016576C4` → the `TShaderMapRef` lookup in `FUN_00A60D30`. It loops over the renderer's views (`TArray<FViewInfo>` at `renderer+0x5C`/`+0x60`, stride `0x1210`) with `SetParameters` **inlined**:
+  - `ProjectionScaleBias` = (`View+0xC8`, `View+0xD8`), i.e. `M[2][2]`, `M[3][2]` of the projection matrix if it sits at `View+0xA0` (our `FPerspectiveMatrix` hook doesn't touch those terms).
+  - `SourceTexelOffsets01` = (0, 0, 1/W, 0), `SourceTexelOffsets23` = (0, 1/H, 1/W, 1/H) from the global buffer size / downsample factor (`DAT_0165785C`, `DAT_01657860`, `DAT_01657884`): same for both eyes.
+  - `FUN_00A48170(View, shader, …)` sets the scene-texture parameters. `MinZ_MaxZRatio` goes through RHI vtable `+0x1C8` with the view. **The scene colour's sampler depends on the view:** `View+0x53C != 0` binds sampler `DAT_01657C3C` instead of the caller's (`&DAT_016578DC`). The ctor and InitViews (`FUN_00A745B0`) zero `+0x53C` per view; no direct `[reg+0x53C]` writer in the renderer was found, so it's set via another base pointer. The `debug/*push_constants.csv` dumps of the two pass-61 draws differ in one word (`0` vs `0x522`) besides the 64-byte constant offset, which may be a different sampler index in DXVK.
+  - Viewport: `View+0x40..0x4C` (X, Y, SizeX, SizeY) / factor; quad via `FUN_00A35FC0` (DrawDenormalizedQuad).
+- **Diagnostic:** `[Debug] DepthDownsampleLog=N` (`games/rememberme/depth_downsample_diag.cpp`) hooks `FUN_00A60D30` and logs, for the next N two-view calls, each view's rect, projection rows and `+0x53C`, then every `SetPixelShaderConstantF`/`SetSamplerState`/`SetTexture`/`SetViewport`/`SetPixelShader` inside the pass. F10 re-arms it. The UE3 RHI may skip redundant state sets, so a state that appears only between the two `SetViewport` lines differs between the eyes.
 
 ### Next steps
 
-1. Find the `SetParameters` function (e.g. xref the shader type global from the static-init code, or find who calls `FUN_005d5e30` with the class's parameter fields). Log the four constants per draw for both eyes in the flat test; check whether the right eye's differ.
+1. ~~Find the `SetParameters` function~~ (inlined in `FUN_00A60D30`, above). Run the flat test (`TestFov` on) with `[Debug] DepthDownsampleLog=3`, press F10 in a banded spot, and compare the two eyes' constants (c0..c3 and the base parameters), samplers and `+0x53C` in the log.
 2. If the right eye's `ProjectionScaleBias`/`MinZ_MaxZRatio` are wrong: find which view/matrix the game reads (e.g. View[0] instead of the eye's own, or terms our `FPerspectiveMatrix` hook perturbs: it rewrites m[0], m[5], m[8], m[9]) and patch it in the hook.
 3. Once A is understood, re-check C (wedge, puddle band) against the same pass.
 

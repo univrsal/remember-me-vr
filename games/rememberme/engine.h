@@ -77,4 +77,27 @@ constexpr uint32_t kLocalPlayerViewState = 0x8C;  // FSceneViewState*
 // FSceneViewFamily: first member is TArray<FSceneView*> Views {data, num, max}.
 constexpr uint32_t kFamilyViewsNum = 0x4;
 
+// UE3 DownsampleSceneDepth (FSceneRenderer member, renderer in ECX, no stack
+// args): per view, renders the half-res depth (FDownsampleSceneDepthPixelShader,
+// type object 0x016576C4) with SetParameters inlined: ProjectionScaleBias =
+// (View+0xC8, View+0xD8), SourceTexelOffsets from the buffer size, then the
+// scene-texture parameters (0x00A48170). Called from 0x00A81590. docs/09.
+using DownsampleSceneDepthFn = void(__attribute__((thiscall)) *)(void* renderer);
+constexpr uint32_t kDownsampleSceneDepth = 0x00A60D30;
+// Bytes 9..12 are a relocatable SEH handler address; check around them.
+constexpr uint8_t kDownsampleSceneDepthPrologueA[] = {0x55, 0x8B, 0xEC, 0x83, 0xE4, 0xF0, 0x6A, 0xFF, 0x68};
+constexpr uint32_t kDownsampleSceneDepthPrologueBOffset = 13;
+constexpr uint8_t kDownsampleSceneDepthPrologueB[] = {0x64, 0xA1, 0x00, 0x00, 0x00, 0x00, 0x50};
+
+// FSceneRenderer: TArray<FViewInfo> Views {data, num, max}; FViewInfo is inline, 0x1210 bytes.
+constexpr uint32_t kRendererViewsData = 0x5C;
+constexpr uint32_t kRendererViewsNum = 0x60;
+constexpr uint32_t kViewInfoStride = 0x1210;
+// FSceneView fields (from the draw code above; unconfirmed names in brackets).
+constexpr uint32_t kViewRenderTargetX = 0x40;      // int X, Y, SizeX, SizeY
+constexpr uint32_t kViewProjectionMatrix = 0xA0;   // [ProjectionMatrix] row-major 4x4 (M[2][2] at 0xC8, M[3][2] at 0xD8)
+// Non-zero: the scene colour is bound with sampler 0x01657C3C instead of the
+// caller's (0x00A48170). Zeroed per frame in InitViews (0x00A745B0).
+constexpr uint32_t kViewSceneColorSamplerSwitch = 0x53C;
+
 }  // namespace rm
