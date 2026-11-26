@@ -24,6 +24,10 @@ using CalcSceneViewFn = void*(__attribute__((thiscall)) *)(void* localPlayer, vo
                                                           FRotator* viewRotation, void* viewport, void* drawer,
                                                           void* outProjection, void* outView);
 constexpr uint32_t kCalcSceneView = 0x008622B0;
+// Return address of the per-frame call in UGameViewportClient::Draw (CALL at
+// 0x0086DEB0). Other callers (0x008635C1 DeProject & co., 0x006F1189,
+// 0x00D50D3F screen-bounds checks) build temporary view families.
+constexpr uint32_t kCalcSceneViewMainReturn = 0x0086DEB5;
 constexpr uint8_t kCalcSceneViewPrologue[] = {0x55, 0x8B, 0xEC, 0x83, 0xE4, 0xF0, 0x6A, 0xFF};
 
 // APlayerController::eventGetPlayerViewPoint thunk: (this, FVector*, FRotator*).
@@ -95,6 +99,7 @@ constexpr uint32_t kRendererViewsNum = 0x60;
 constexpr uint32_t kViewInfoStride = 0x1210;
 // FSceneView fields (from the draw code above; unconfirmed names in brackets).
 constexpr uint32_t kViewRenderTargetX = 0x40;      // int X, Y, SizeX, SizeY
+constexpr uint32_t kViewViewMatrix = 0x60;         // ViewMatrix (FSceneView ctor argument 15, copied to +0x60)
 constexpr uint32_t kViewProjectionMatrix = 0xA0;   // [ProjectionMatrix] row-major 4x4 (M[2][2] at 0xC8, M[3][2] at 0xD8)
 // Non-zero: the scene colour is bound with sampler 0x01657C3C instead of the
 // caller's (0x00A48170). Zeroed per frame in InitViews (0x00A745B0).

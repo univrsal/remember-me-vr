@@ -54,6 +54,12 @@ struct State {
   bool loggedLookAt = false;
 
   EyeOverride eye;
+
+  // The last per-frame stereo call's left eye, reused (as one view, without a
+  // new stereo frame) for calls that build temporary view families.
+  bool haveLastLeft = false;
+  EyeOverride lastLeft;
+  uint64_t tempCalls = 0;
 };
 
 State g;
@@ -63,6 +69,7 @@ PerspectiveMatrixFn g_origPerspectiveMatrix = nullptr;
 PovLookAtFn g_origPovLookAt = nullptr;
 void* g_povLookAtReturn = nullptr;
 AllocateViewStateFn g_allocateViewState = nullptr;
+void* g_mainCallReturn = nullptr;
 
 // Smallest symmetric frustum containing `fov` (diagnostic/workaround for passes
 // that assume a centred projection).
@@ -168,8 +175,27 @@ void* CallEye(void* self, float originX, float sizeX, void* viewState, const Eye
 
 void* __fastcall HookCalcSceneView(void* self, void* /*edx*/, void* family, FVector* loc, FRotator* rot,
                                    void* viewport, void* drawer, void* outProjection, void* outView) {
-  const uint64_t call = ++g.calls;
   const bool matricesOnly = outProjection && outView;
+  // Temporary view families (screen-bounds checks, DeProject, ...): one view
+  // matching the current left eye, so screen-space results agree with View[0];
+  // never a new stereo frame (that would queue an extra frame for Present).
+  if (__builtin_return_address(0) != g_mainCallReturn && !matricesOnly) {
+    if (!g.haveLastLeft) {
+      return g_origCalcSceneView(self, family, loc, rot, viewport, drawer, outProjection, outView);
+    }
+    const FVector2D origin = Field<FVector2D>(self, kLocalPlayerOrigin);
+    const FVector2D size = Field<FVector2D>(self, kLocalPlayerSize);
+    void* const viewState = Field<void*>(self, kLocalPlayerViewState);
+    void* view = CallEye(self, origin.x, size.x * 0.5f, viewState, g.lastLeft, family, loc, rot, viewport, drawer);
+    Field<FVector2D>(self, kLocalPlayerOrigin) = origin;
+    Field<FVector2D>(self, kLocalPlayerSize) = size;
+    if (g.tempCalls++ == 0) {
+      VR_LOG_INFO("CalcSceneView from %p (temporary view family %p): left-eye view, no stereo frame",
+                  __builtin_return_address(0), family);
+    }
+    return view;
+  }
+  const uint64_t call = ++g.calls;
   const FVector2D origin = Field<FVector2D>(self, kLocalPlayerOrigin);
   const FVector2D size = Field<FVector2D>(self, kLocalPlayerSize);
   void* const viewState = Field<void*>(self, kLocalPlayerViewState);
@@ -182,6 +208,7 @@ void* __fastcall HookCalcSceneView(void* self, void* /*edx*/, void* family, FVec
   void* view;
   void* rightView = nullptr;
   if (!vr && !sbs) {
+    if (!matricesOnly) g.haveLastLeft = false;
     view = g_origCalcSceneView(self, family, loc, rot, viewport, drawer, outProjection, outView);
   } else {
     const float half = size.x * 0.5f;
@@ -208,6 +235,8 @@ void* __fastcall HookCalcSceneView(void* self, void* /*edx*/, void* family, FVec
       }
     }
     view = CallEye(self, origin.x, half, viewState, left, family, loc, rot, viewport, drawer);
+    g.lastLeft = left;
+    g.haveLastLeft = true;
     rightView = CallEye(self, origin.x + half, half, RightEyeState(viewState), right, family, loc, rot, viewport,
                         drawer);
     // Everything after us (HUD, audio listener, ...) sees the normal player again.
@@ -291,6 +320,7 @@ bool SceneViewHooks::Install() {
   void* perspectiveMatrix = exe.FromPreferredVA(kPerspectiveMatrix);
   void* povLookAt = exe.FromPreferredVA(kPovLookAt);
   g_povLookAtReturn = exe.FromPreferredVA(kPovLookAtReturnInCalcSceneView);
+  g_mainCallReturn = exe.FromPreferredVA(kCalcSceneViewMainReturn);
   auto* allocateViewState = exe.FromPreferredVA<uint8_t>(kAllocateViewState);
   if (!CheckPrologue(calcSceneView, kCalcSceneViewPrologue, sizeof(kCalcSceneViewPrologue), "CalcSceneView") ||
       !CheckPrologue(getPlayerViewPoint, kGetPlayerViewPointPrologue, sizeof(kGetPlayerViewPointPrologue),

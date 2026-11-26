@@ -3,6 +3,12 @@
 #include <atomic>
 #include <cmath>
 #include <cstdint>
+#include <cstring>
+#include <memory>
+#include <mutex>
+#include <string>
+#include <unordered_map>
+#include <utility>
 #include <vector>
 
 #include "vrcore/hook.h"
@@ -15,7 +21,10 @@ namespace {
 constexpr size_t kSetViewport = 47;
 constexpr size_t kSetTexture = 65;
 constexpr size_t kSetSamplerState = 69;
+constexpr size_t kCreateVertexShader = 91;
+constexpr size_t kSetVertexShader = 92;
 constexpr size_t kSetVertexShaderConstantF = 94;
+constexpr size_t kCreatePixelShader = 106;
 constexpr size_t kSetPixelShader = 107;
 constexpr size_t kSetPixelShaderConstantF = 109;
 
@@ -24,6 +33,9 @@ using SetTexture_t = HRESULT(STDMETHODCALLTYPE*)(IDirect3DDevice9*, DWORD, IDire
 using SetSamplerState_t = HRESULT(STDMETHODCALLTYPE*)(IDirect3DDevice9*, DWORD, D3DSAMPLERSTATETYPE, DWORD);
 using SetPixelShader_t = HRESULT(STDMETHODCALLTYPE*)(IDirect3DDevice9*, IDirect3DPixelShader9*);
 using SetConstantF_t = HRESULT(STDMETHODCALLTYPE*)(IDirect3DDevice9*, UINT, const float*, UINT);
+using CreateVertexShader_t = HRESULT(STDMETHODCALLTYPE*)(IDirect3DDevice9*, const DWORD*, IDirect3DVertexShader9**);
+using SetVertexShader_t = HRESULT(STDMETHODCALLTYPE*)(IDirect3DDevice9*, IDirect3DVertexShader9*);
+using CreatePixelShader_t = HRESULT(STDMETHODCALLTYPE*)(IDirect3DDevice9*, const DWORD*, IDirect3DPixelShader9**);
 
 SetViewport_t g_origSetViewport = nullptr;
 SetTexture_t g_origSetTexture = nullptr;
@@ -31,6 +43,14 @@ SetSamplerState_t g_origSetSamplerState = nullptr;
 SetPixelShader_t g_origSetPixelShader = nullptr;
 SetConstantF_t g_origSetVertexShaderConstantF = nullptr;
 SetConstantF_t g_origSetPixelShaderConstantF = nullptr;
+CreateVertexShader_t g_origCreateVertexShader = nullptr;
+SetVertexShader_t g_origSetVertexShader = nullptr;
+CreatePixelShader_t g_origCreatePixelShader = nullptr;
+
+// Float constants of a shader, from its CTAB comment block: name -> first register.
+using ShaderConstants = std::vector<std::pair<std::string, int>>;
+std::mutex g_shadersMutex;
+std::unordered_map<const void*, std::shared_ptr<const ShaderConstants>> g_shaders;
 
 Options g_options;
 std::atomic<bool> g_installed{false};
@@ -40,6 +60,63 @@ std::atomic<uint64_t> g_fixedCount{0};
 thread_local D3DVIEWPORT9 t_viewport{0, 0, 0, 0, 0.0f, 1.0f};
 thread_local bool t_trace = false;
 thread_local std::vector<float> t_scratch;
+thread_local std::shared_ptr<const ShaderConstants> t_vs, t_ps;
+
+// Parses the CTAB comment of SM2/3 bytecode into float-register constants.
+ShaderConstants ParseConstantTable(const DWORD* code) {
+  ShaderConstants out;
+  if (!code) return out;
+  for (size_t i = 1; i < 1 << 16; ) {  // token 0 is the version
+    const DWORD token = code[i];
+    if (token == 0x0000FFFF) break;    // end
+    if ((token & 0xFFFF) != 0xFFFE) break;  // the CTAB comment comes first, before any instruction
+    const DWORD length = (token >> 16) & 0x7FFF;
+    const auto* body = reinterpret_cast<const uint8_t*>(code + i + 1);
+    const size_t bytes = length * 4;
+    if (bytes >= 32 && std::memcmp(body, "CTAB", 4) == 0) {
+      const uint8_t* ctab = body + 4;
+      const size_t size = bytes - 4;
+      uint32_t count = 0, info = 0;
+      std::memcpy(&count, ctab + 12, 4);
+      std::memcpy(&info, ctab + 16, 4);
+      for (uint32_t k = 0; k < count && info + (k + 1) * 20 <= size; ++k) {
+        uint32_t nameOffset = 0;
+        uint16_t regSet = 0, regIndex = 0;
+        std::memcpy(&nameOffset, ctab + info + k * 20, 4);
+        std::memcpy(&regSet, ctab + info + k * 20 + 4, 2);
+        std::memcpy(&regIndex, ctab + info + k * 20 + 6, 2);
+        if (regSet != 2 || nameOffset >= size) continue;  // 2 = D3DXRS_FLOAT4
+        const char* name = reinterpret_cast<const char*>(ctab + nameOffset);
+        out.emplace_back(std::string(name, strnlen(name, size - nameOffset)), regIndex);
+      }
+      break;
+    }
+    i += length + 1;
+  }
+  return out;
+}
+
+void Remember(const void* shader, const DWORD* code) {
+  if (!shader) return;
+  auto constants = std::make_shared<const ShaderConstants>(ParseConstantTable(code));
+  std::lock_guard<std::mutex> lock(g_shadersMutex);
+  g_shaders[shader] = std::move(constants);
+}
+
+std::shared_ptr<const ShaderConstants> Lookup(const void* shader) {
+  if (!shader) return nullptr;
+  std::lock_guard<std::mutex> lock(g_shadersMutex);
+  auto it = g_shaders.find(shader);
+  return it == g_shaders.end() ? nullptr : it->second;
+}
+
+int FindConstant(const std::shared_ptr<const ShaderConstants>& shader, const char* name) {
+  if (!shader) return -1;
+  for (const auto& [n, reg] : *shader) {
+    if (n == name) return reg;
+  }
+  return -1;
+}
 
 const char* SamplerStateName(D3DSAMPLERSTATETYPE t) {
   switch (t) {
@@ -126,7 +203,27 @@ HRESULT STDMETHODCALLTYPE HookSetSamplerState(IDirect3DDevice9* self, DWORD samp
 
 HRESULT STDMETHODCALLTYPE HookSetPixelShader(IDirect3DDevice9* self, IDirect3DPixelShader9* shader) {
   if (t_trace) VR_LOG_INFO("  SetPixelShader %p", static_cast<void*>(shader));
+  t_ps = Lookup(shader);
   return g_origSetPixelShader(self, shader);
+}
+
+HRESULT STDMETHODCALLTYPE HookSetVertexShader(IDirect3DDevice9* self, IDirect3DVertexShader9* shader) {
+  t_vs = Lookup(shader);
+  return g_origSetVertexShader(self, shader);
+}
+
+HRESULT STDMETHODCALLTYPE HookCreateVertexShader(IDirect3DDevice9* self, const DWORD* code,
+                                                 IDirect3DVertexShader9** shader) {
+  const HRESULT hr = g_origCreateVertexShader(self, code, shader);
+  if (SUCCEEDED(hr) && shader) Remember(*shader, code);
+  return hr;
+}
+
+HRESULT STDMETHODCALLTYPE HookCreatePixelShader(IDirect3DDevice9* self, const DWORD* code,
+                                                IDirect3DPixelShader9** shader) {
+  const HRESULT hr = g_origCreatePixelShader(self, code, shader);
+  if (SUCCEEDED(hr) && shader) Remember(*shader, code);
+  return hr;
 }
 
 void TraceConstants(const char* stage, UINT reg, const float* data, UINT count, const float* sent) {
@@ -164,6 +261,12 @@ bool Install(IDirect3DDevice9* device, const Options& options) {
                            &g_origSetSamplerState);
   ok = ok && InstallVTable("IDirect3DDevice9::SetPixelShader", device, kSetPixelShader, &HookSetPixelShader,
                            &g_origSetPixelShader);
+  ok = ok && InstallVTable("IDirect3DDevice9::CreateVertexShader", device, kCreateVertexShader,
+                           &HookCreateVertexShader, &g_origCreateVertexShader);
+  ok = ok && InstallVTable("IDirect3DDevice9::SetVertexShader", device, kSetVertexShader, &HookSetVertexShader,
+                           &g_origSetVertexShader);
+  ok = ok && InstallVTable("IDirect3DDevice9::CreatePixelShader", device, kCreatePixelShader,
+                           &HookCreatePixelShader, &g_origCreatePixelShader);
   ok = ok && InstallVTable("IDirect3DDevice9::SetVertexShaderConstantF", device, kSetVertexShaderConstantF,
                            &HookSetVertexShaderConstantF, &g_origSetVertexShaderConstantF);
   ok = ok && InstallVTable("IDirect3DDevice9::SetPixelShaderConstantF", device, kSetPixelShaderConstantF,
@@ -174,5 +277,9 @@ bool Install(IDirect3DDevice9* device, const Options& options) {
 }
 
 void SetTrace(bool enabled) { t_trace = enabled; }
+
+const D3DVIEWPORT9& CurrentViewport() { return t_viewport; }
+int VertexShaderConstant(const char* name) { return FindConstant(t_vs, name); }
+int PixelShaderConstant(const char* name) { return FindConstant(t_ps, name); }
 
 }  // namespace rm::device_state

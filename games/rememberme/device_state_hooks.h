@@ -22,6 +22,15 @@ struct Options {
 
 bool Install(IDirect3DDevice9* device, const Options& options);
 
+// Render thread: the viewport last set with SetViewport.
+const D3DVIEWPORT9& CurrentViewport();
+
+// Render thread: the first float register of a named constant (from the
+// shader's constant table) in the currently bound vertex/pixel shader, or -1
+// if the shader doesn't have it (or was created before the hooks).
+int VertexShaderConstant(const char* name);
+int PixelShaderConstant(const char* name);
+
 // Logs every viewport, texture, sampler state, pixel shader and pixel/vertex
 // shader constant set on the calling thread while enabled (render thread).
 void SetTrace(bool enabled);

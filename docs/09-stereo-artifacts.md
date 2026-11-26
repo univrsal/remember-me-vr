@@ -9,7 +9,7 @@ Status as of 2026-11-26. Stereo, depth, head tracking and resolution work (M3 pa
 | A | Light/fog effect cut by horizontal bands (thickness varies with view angle) | right only | **Fixed** (confirmed in game 2026-11-26, flat test): `DNEResolution` ignored the view offset (below). `[Stereo] FixDNEResolution` |
 | B | Character shadow offset horizontally, opposite directions per eye (not under the feet) | both, mirrored | Reproduces in the flat F10 test with `TestFov` when symmetric projection is off. Not yet analysed in a capture |
 | C | Blue/shadow wedge on Nilin; puddle reflection band | right | Probably the same cause as A: no water-reflection issues seen with the fix (2026-11-26, brief flat test). Recheck the wedge on Nilin and puddles in VR |
-| D | Sensen AR hints: left eye only, misplaced, follow head roll | left | Needs the per-eye Sensen work (see 08) |
+| D | Sensen AR hints: left eye only, misplaced, follow head roll | left | **Built, untested in game:** right-eye redraw (`[Stereo] SensenStereo`), see "Artifact D" below |
 | E | Loading screen shows the level around the tips panel | both | Needs loading detection |
 | F | Monitor mirror has no UI in stereo frames | — | Open |
 
@@ -46,7 +46,7 @@ Found in `lighting_band_artifact.rdc` (flat F10 test, 4736×2632) with the scrip
 The previous localisation to pass 61 (`FUN_00A60D30`, `DownsampleSceneDepth`) was wrong. Image 891 (ResourceId 9569) looked banded in its right half at pass 61, but **pass 61 doesn't write colour** (write mask 0); the image holds leftovers from the previous frame's per-eye half-res colour passes 75/94 (`fs.758ca32`). Pixel history shows both eyes' downsample draws write exactly the shader's output into the half-res depth (9536), and the `DepthDownsampleLog` run showed correct per-eye constants. What was learned there:
 
 - `FUN_00A60D30` is UE3's `DownsampleSceneDepth` (renderer in ECX; called from `FUN_00A81590+639`), found via `L"FDownsampleSceneDepthPixelShader"` → static init `0x0120282D` → type object `0x016576C4`. It loops over `TArray<FViewInfo>` at `renderer+0x5C`/`+0x60` (stride `0x1210`) with `SetParameters` inlined: `ProjectionScaleBias` = `View+0xC8`/`+0xD8` (projection matrix at `View+0xA0`, confirmed by the log), buffer-size texel offsets, and `FUN_00A48170` (scene-texture parameters; `View+0x53C != 0` selects sampler `DAT_01657C3C`; always 0 in the log). Viewport `View+0x40..0x4C` (X, Y, SizeX, SizeY).
-- `[Debug] DepthDownsampleLog=N` logs that pass per eye (now through the shared device-state tracing).
+- `[Debug] DepthDownsampleLog=N` logs that pass per eye (`games/rememberme/renderer_hooks.cpp`, through the shared device-state tracing).
 - The half-res depth 9536 is never cleared; the downsample writes with depth test "always", so that's harmless.
 
 ### Frame structure notes (flat stereo capture)
@@ -59,6 +59,24 @@ The previous localisation to pass 61 (`FUN_00A60D30`, `DownsampleSceneDepth`) wa
 1. ~~Test `FixDNEResolution=1`~~: bands gone in the flat test. Still to do: a longer VR run.
 2. Recheck artifact C (wedge on Nilin, puddle band) in VR; no reflection issues seen so far.
 3. Optional: find the engine function that fills `DNEResolution` (it reads the material parameter at +0x6 of the struct bound in `FUN_0096DB10`) and add the view offset there instead.
+
+## Artifact D: Sensen AR hints (2026-11-26)
+
+From `in_world_hint_stereo.rdc` (flat F10 test, 1880×2096 scene, SuperSampleCount 1):
+
+- **Hint layer, pass 110 (EIDs 6726–6954):** Scaleform draws the hints into an offscreen layer (ResourceId 9535, scene-sized, scene depth attached) with **View[0]'s viewport only** (x=0, w=940). The pass clears the whole layer (`loadOp = Clear` over 1880×2096). Shaders `vs.e16bfa9`/`fs.099af47`, `vs.74cd077`/`fs.4020d7e`, `vs.22a5c61`/`fs.127d52f`; every VS has one constant **`Transform` (c6–c9)**.
+- **`Transform` = (movie-to-world affine) × View[0]'s translated view-projection.** Tested on EID 6737: `Transform · inverse(VP)` (VP from a left-eye fog draw's `ViewProjectionMatrix`) has last column exactly (0,0,0,1), with a translation ~430 uu from the camera. So the hints use the view's own matrices; a right-eye version is `T · C` with `C = inverse(TVP_L) · Translate(origin_L − origin_R) · TVP_R`.
+- **Composite, pass 111 (EIDs 6983–7004):** `vs.83471f9`/`fs.3060a90` (`DNESensenParam1/2`, `DNEOverlayColor`, `NoiseTexture`, the layer bound as `SceneColorTexture`) blends tiles of the layer over the scene (`One`, `InvSrcAlpha`). Tiles are a 6×5 grid over **one view's rect**, chosen by a bitmask of tiles with hint content (`FUN_00EC5D30`, drawn with `DrawDenormalizedQuad` `FUN_00A35FC0`, i.e. client-memory quads: float4 clip position + float2 UV). The shader samples by texture coordinate and **discards** pixels with (almost) no hint content, so compositing extra area is harmless.
+- Composite entry points: `FUN_00ECBE50`/`FUN_00ECBF70` set a viewport from a rect and call `FUN_00ECB560`/`FUN_00ECBA30`, which set up the Sensen texture shaders and call the tile loop.
+- **Screen-space checks build temporary view families.** `FUN_00D50C00` (called from `FUN_00E641E0` "object covers X% of the screen" and `FUN_00D5C1B0` "screen positions of a list of actors") creates a family and calls `CalcSceneView`, then projects a bounding box. So do `FUN_008635C1` (`ULocalPlayer::execDeProject` & co.) and `FUN_006F1189`. **Our hook used to treat these like the per-frame call:** in VR it built two eye views in the temporary family and queued an extra `SubmitStereoFrame`, shifting the poses submitted with later frames (a possible source of the choppiness noted in 06). Fixed: only the call from `UGameViewportClient::Draw` (return address `0x0086DEB5`) starts a stereo frame; the others get one view with the current left eye's pose and FOV.
+
+**Fix (built, untested in game):** `[Stereo] SensenStereo=1` (`games/rememberme/sensen_stereo.cpp`), on the render thread:
+- `renderer_hooks` (`DownsampleSceneDepth`, runs before the hint pass) records both views' rects, view matrices (`View+0x60`) and projections (`View+0xA0`) and computes `C`.
+- A draw observer (new `vrcore::scene_tap::SetDrawObserver`) sees every non-UI draw. A draw whose vertex shader has a `Transform` constant (from the shader's CTAB, parsed at `CreateVertexShader`), in View[0]'s viewport, not into the backbuffer, is drawn again with View[1]'s viewport and `Transform · C` (or the same transform if it has no perspective).
+- The first composite draw of the frame (pixel shader with `DNESensenParam1`, client-memory quad) adds one quad covering View[1]'s rect, with UVs extended from the tile's position→UV mapping.
+- The log prints one line each for the first duplicated hint draw and the first right-view composite, and one if a Scaleform draw's viewport doesn't match View[0] (then nothing is duplicated).
+
+Next: test in the flat F10 test (hints should appear in both halves at the right depth) and in VR (placement, head roll); check that DeProject-based things (e.g. aiming/targeting reticles, if any) still line up with the left eye.
 
 ## Artifact B: notes
 

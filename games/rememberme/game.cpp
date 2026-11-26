@@ -2,9 +2,10 @@
 
 #include <cinttypes>
 
-#include "depth_downsample_diag.h"
 #include "device_state_hooks.h"
+#include "renderer_hooks.h"
 #include "scene_view_hooks.h"
+#include "sensen_stereo.h"
 #include "vrcore/compositor.h"
 #include "vrcore/game.h"
 #include "vrcore/log.h"
@@ -50,7 +51,8 @@ class RememberMe final : public vrcore::Game {
     ue3DumpKey_ = config.GetInt("UE3", "DumpObjectsKey", 0x78);  // F9
     engineHooks_ = config.GetBool("Stereo", "EngineHooks", true);
     sceneViews_.Configure(config, vrEnabled_ ? &compositor_ : nullptr);
-    rm::depth_downsample_diag::Configure(config);
+    rm::renderer_hooks::Configure(config);
+    rm::sensen_stereo::Configure(config);
     deviceState_.fixDneResolution = config.GetBool("Stereo", "FixDNEResolution", true);
     VR_LOG_INFO("VR %s: mode %s, screen fallback %.1f m wide at %.1f m, recenter key 0x%02x",
                 vrEnabled_ ? "on" : "off", vr.mode == vrcore::Compositor::Mode::Stereo ? "stereo" : "screen",
@@ -70,9 +72,11 @@ class RememberMe final : public vrcore::Game {
         engineHooksInstalled_ = sceneViews_.Install();
         // Stereo fixes at the D3D9 level (right-eye view offset) and the
         // per-eye diagnostics that trace through the same hooks.
-        if (engineHooksInstalled_ && (deviceState_.fixDneResolution || rm::depth_downsample_diag::Enabled())) {
+        if (engineHooksInstalled_ && (deviceState_.fixDneResolution || rm::renderer_hooks::DiagnosticEnabled() ||
+                                      rm::sensen_stereo::Enabled())) {
           rm::device_state::Install(device, deviceState_);
-          rm::depth_downsample_diag::Install();
+          rm::renderer_hooks::Install();
+          rm::sensen_stereo::Install();
         }
       } else {
         VR_LOG_WARN("engine hooks skipped: unknown game build");
@@ -96,10 +100,11 @@ class RememberMe final : public vrcore::Game {
       const bool down = (GetAsyncKeyState(sceneViews_.ToggleKey()) & 0x8000) != 0;
       if (down && !sbsKeyDown_) {
         sceneViews_.ToggleSideBySide();
-        rm::depth_downsample_diag::Rearm();
+        rm::renderer_hooks::Rearm();
       }
       sbsKeyDown_ = down;
     }
+    rm::sensen_stereo::EndFrame();
     if (vrEnabled_) {
       IDirect3DTexture9* scene = vrcore::scene_tap::Take();
       IDirect3DTexture9* ui = vrcore::scene_tap::TakeUi();

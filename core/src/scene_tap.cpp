@@ -48,6 +48,9 @@ bool g_recorded = false;            // this frame's scene texture already captur
 IDirect3DTexture9* g_scene = nullptr;
 IDirect3DBaseTexture9* g_sceneIdentity = nullptr;  // for recognising the copy draws
 
+DrawObserver g_observer = nullptr;
+thread_local bool t_inObserver = false;  // no re-entry while an observer adds draws
+
 IDirect3DTexture9* g_ui = nullptr;  // our render target (D3DPOOL_DEFAULT)
 IDirect3DSurface9* g_uiSurface = nullptr;
 UINT g_uiWidth = 0, g_uiHeight = 0;
@@ -141,6 +144,7 @@ bool RedirectUi(IDirect3DDevice9* device) {
 struct DrawScope {
   IDirect3DDevice9* device;
   bool blendPatched = false;
+  bool ui = false;  // this draw went to the UI target
   DWORD separate = 0, srcAlpha = 0, dstAlpha = 0;
 
   explicit DrawScope(IDirect3DDevice9* d) : device(d) {
@@ -161,6 +165,7 @@ struct DrawScope {
       return;
     }
     if (!RedirectUi(device)) return;
+    ui = true;
     using GetRenderState_t = HRESULT(STDMETHODCALLTYPE*)(IDirect3DDevice9*, D3DRENDERSTATETYPE, DWORD*);
     using SetRenderState_t = HRESULT(STDMETHODCALLTYPE*)(IDirect3DDevice9*, D3DRENDERSTATETYPE, DWORD);
     auto get = VFn<GetRenderState_t>(device, kGetRenderState);
@@ -198,34 +203,100 @@ HRESULT STDMETHODCALLTYPE HookSetRenderTarget(IDirect3DDevice9* self, DWORD inde
   return g_origSetRenderTarget(self, index, surface);
 }
 
+void Notify(IDirect3DDevice9* device, const DrawScope& scope, const DrawCall& call) {
+  if (!g_observer || scope.ui || t_inObserver) return;
+  t_inObserver = true;
+  g_observer(device, call);
+  t_inObserver = false;
+}
+
 HRESULT STDMETHODCALLTYPE HookDrawPrimitive(IDirect3DDevice9* self, D3DPRIMITIVETYPE type, UINT start, UINT count) {
   DrawScope scope(self);
-  return g_origDrawPrimitive(self, type, start, count);
+  const HRESULT hr = g_origDrawPrimitive(self, type, start, count);
+  if (g_observer) {
+    DrawCall call{DrawCall::Kind::Primitive, type};
+    call.start = start;
+    call.count = count;
+    Notify(self, scope, call);
+  }
+  return hr;
 }
 
 HRESULT STDMETHODCALLTYPE HookDrawIndexedPrimitive(IDirect3DDevice9* self, D3DPRIMITIVETYPE type, INT base,
                                                    UINT minIndex, UINT numVertices, UINT start, UINT count) {
   DrawScope scope(self);
-  return g_origDrawIndexedPrimitive(self, type, base, minIndex, numVertices, start, count);
+  const HRESULT hr = g_origDrawIndexedPrimitive(self, type, base, minIndex, numVertices, start, count);
+  if (g_observer) {
+    DrawCall call{DrawCall::Kind::IndexedPrimitive, type};
+    call.baseVertex = base;
+    call.minIndex = minIndex;
+    call.numVertices = numVertices;
+    call.start = start;
+    call.count = count;
+    Notify(self, scope, call);
+  }
+  return hr;
 }
 
 HRESULT STDMETHODCALLTYPE HookDrawPrimitiveUP(IDirect3DDevice9* self, D3DPRIMITIVETYPE type, UINT count,
                                               const void* data, UINT stride) {
   DrawScope scope(self);
-  return g_origDrawPrimitiveUP(self, type, count, data, stride);
+  const HRESULT hr = g_origDrawPrimitiveUP(self, type, count, data, stride);
+  if (g_observer) {
+    DrawCall call{DrawCall::Kind::PrimitiveUP, type};
+    call.count = count;
+    call.vertices = data;
+    call.stride = stride;
+    Notify(self, scope, call);
+  }
+  return hr;
 }
 
 HRESULT STDMETHODCALLTYPE HookDrawIndexedPrimitiveUP(IDirect3DDevice9* self, D3DPRIMITIVETYPE type, UINT minIndex,
                                                      UINT numVertices, UINT count, const void* indices,
                                                      D3DFORMAT indexFormat, const void* vertices, UINT stride) {
   DrawScope scope(self);
-  return g_origDrawIndexedPrimitiveUP(self, type, minIndex, numVertices, count, indices, indexFormat, vertices,
-                                      stride);
+  const HRESULT hr = g_origDrawIndexedPrimitiveUP(self, type, minIndex, numVertices, count, indices, indexFormat,
+                                                  vertices, stride);
+  if (g_observer) {
+    DrawCall call{DrawCall::Kind::IndexedPrimitiveUP, type};
+    call.minIndex = minIndex;
+    call.numVertices = numVertices;
+    call.count = count;
+    call.indices = indices;
+    call.indexFormat = indexFormat;
+    call.vertices = vertices;
+    call.stride = stride;
+    Notify(self, scope, call);
+  }
+  return hr;
 }
 
 }  // namespace
 
 void Enable(bool enable) { g_enabled = enable; }
+void SetDrawObserver(DrawObserver observer) { g_observer = observer; }
+
+HRESULT DrawCall::Reissue(IDirect3DDevice9* device, const void* otherVertices) const {
+  const void* v = otherVertices ? otherVertices : vertices;
+  switch (kind) {
+    case Kind::Primitive:
+      return g_origDrawPrimitive(device, type, start, count);
+    case Kind::IndexedPrimitive:
+      return g_origDrawIndexedPrimitive(device, type, baseVertex, minIndex, numVertices, start, count);
+    case Kind::PrimitiveUP:
+      return g_origDrawPrimitiveUP(device, type, count, v, stride);
+    case Kind::IndexedPrimitiveUP:
+      return g_origDrawIndexedPrimitiveUP(device, type, minIndex, numVertices, count, indices, indexFormat, v,
+                                          stride);
+  }
+  return E_INVALIDARG;
+}
+
+HRESULT DrawPrimitiveUPDirect(IDirect3DDevice9* device, D3DPRIMITIVETYPE type, UINT count, const void* vertices,
+                              UINT stride) {
+  return g_origDrawPrimitiveUP(device, type, count, vertices, stride);
+}
 void EnableUiRedirect(bool enable) { g_uiEnabled = enable; }
 bool Enabled() { return g_enabled; }
 

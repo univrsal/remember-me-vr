@@ -73,7 +73,7 @@ Each milestone reduces the risk of the next one. **Milestone 3 is the go/no-go g
 - [ ] Bink FMV cinema mode; decide how to handle in-engine cutscenes (stereo with the camera locked, or a theatre view)
 - [ ] Comfort: no roll or shakes; world scale; recentre; INI config
 - [ ] 2D UI on its own panel (built, untested): in stereo frames, every backbuffer draw after the scene copy that doesn't sample the scene image is UI laid out in the left view's rect. It's redirected into a transparent texture of that size (premultiplied alpha via separate alpha blend, restored per draw) and submitted as a quad layer over the stereo projection layer. Mono frames are untouched. Open: the monitor mirror shows no UI in stereo frames
-- [ ] Sensen AR hints rendered per eye (currently left eye only, see 08)
+- [ ] Sensen AR hints rendered per eye: right-eye redraw built (`[Stereo] SensenStereo`, see 09 "Artifact D"), untested. Also fixed: temporary view families (screen-bounds checks, DeProject) no longer start extra stereo frames
 - [ ] UI panel test (2026-11-26): works for the most part. Open issues:
   - Loading screens render the level being streamed in; the white tips panel only covers it on a flat screen. Detect loading and cover or hide the scene.
   - ~~Right-eye artifacts~~: light shaft bands **fixed** (`DNEResolution` ignored the right view's offset; `[Stereo] FixDNEResolution`, see [09](09-stereo-artifacts.md)). Water reflections looked fine afterwards; recheck the wedge on Nilin in VR.

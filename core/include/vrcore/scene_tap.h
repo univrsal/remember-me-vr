@@ -29,6 +29,38 @@ bool Enabled();
 IDirect3DTexture9* Take();    // scene image
 IDirect3DTexture9* TakeUi();  // redirected UI (only if any UI was drawn this frame)
 
+// A draw call as the game issued it.
+struct DrawCall {
+  enum class Kind { Primitive, IndexedPrimitive, PrimitiveUP, IndexedPrimitiveUP };
+  Kind kind;
+  D3DPRIMITIVETYPE type;
+  INT baseVertex = 0;          // IndexedPrimitive
+  UINT minIndex = 0;           // indexed kinds
+  UINT numVertices = 0;        // indexed kinds
+  UINT start = 0;              // Primitive: start vertex; IndexedPrimitive: start index
+  UINT count = 0;              // primitive count
+  const void* indices = nullptr;   // IndexedPrimitiveUP
+  D3DFORMAT indexFormat = D3DFMT_UNKNOWN;
+  const void* vertices = nullptr;  // UP kinds
+  UINT stride = 0;                 // UP kinds
+
+  // Issues the same draw again with the device's current state, bypassing
+  // the hooks. For UP kinds, `otherVertices` (same layout and count) replaces
+  // the game's vertex data.
+  HRESULT Reissue(IDirect3DDevice9* device, const void* otherVertices = nullptr) const;
+};
+
+// Called on the drawing thread after every draw that wasn't redirected into
+// the UI texture (i.e. scene and offscreen work), with the device state the
+// draw used still bound. The observer may change state and Reissue() the draw
+// (e.g. for another view), but must restore the state it changed. One observer.
+using DrawObserver = void (*)(IDirect3DDevice9* device, const DrawCall& call);
+void SetDrawObserver(DrawObserver observer);
+
+// Draws client-memory vertices bypassing the hooks (for observers adding draws).
+HRESULT DrawPrimitiveUPDirect(IDirect3DDevice9* device, D3DPRIMITIVETYPE type, UINT count, const void* vertices,
+                              UINT stride);
+
 namespace detail {
 void InstallHooks(IDirect3DDevice9* device);
 void BeforePresent(IDirect3DDevice9* device);  // undo a pending UI redirect

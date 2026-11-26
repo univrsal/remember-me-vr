@@ -1,16 +1,17 @@
-#include "depth_downsample_diag.h"
+#include "renderer_hooks.h"
 
 #include <atomic>
 #include <cstdint>
 
 #include "device_state_hooks.h"
 #include "engine.h"
+#include "sensen_stereo.h"
 #include "vrcore/hook.h"
 #include "vrcore/log.h"
 #include "vrcore/memory.h"
 #include "vrcore/process.h"
 
-namespace rm::depth_downsample_diag {
+namespace rm::renderer_hooks {
 namespace {
 
 DownsampleSceneDepthFn g_origDownsample = nullptr;
@@ -40,6 +41,7 @@ void LogView(int index, uintptr_t view) {
 }
 
 void __fastcall HookDownsample(void* renderer, void* /*edx*/) {
+  sensen_stereo::OnRendererViews(renderer);
   const auto base = reinterpret_cast<uintptr_t>(renderer);
   const int32_t views = At<int32_t>(base, kRendererViewsNum);
   const bool log = views >= 2 && g_remaining.load(std::memory_order_relaxed) > 0;
@@ -65,25 +67,26 @@ void Configure(const vrcore::Config& config) {
   g_remaining = g_logCalls;
 }
 
-bool Enabled() { return g_logCalls > 0; }
+bool DiagnosticEnabled() { return g_logCalls > 0; }
 
 void Install() {
-  if (g_logCalls <= 0 || g_origDownsample) return;
+  if (g_origDownsample || (g_logCalls <= 0 && !sensen_stereo::Enabled())) return;
   auto* fn = vrcore::Exe().FromPreferredVA<uint8_t>(kDownsampleSceneDepth);
   if (!vrcore::mem::Matches(reinterpret_cast<uintptr_t>(fn), kDownsampleSceneDepthPrologueA,
                             sizeof(kDownsampleSceneDepthPrologueA)) ||
       !vrcore::mem::Matches(reinterpret_cast<uintptr_t>(fn) + kDownsampleSceneDepthPrologueBOffset,
                             kDownsampleSceneDepthPrologueB, sizeof(kDownsampleSceneDepthPrologueB))) {
-    VR_LOG_ERROR("depth downsample diagnostic: DownsampleSceneDepth prologue doesn't match this build");
+    VR_LOG_ERROR("renderer hooks: DownsampleSceneDepth prologue doesn't match this build");
     return;
   }
   const bool ok = vrcore::hook::Install("DownsampleSceneDepth", reinterpret_cast<void*>(fn),
                                         reinterpret_cast<void*>(&HookDownsample),
                                         reinterpret_cast<void**>(&g_origDownsample));
-  VR_LOG_INFO("depth downsample diagnostic %s: logging %d stereo call(s), re-armed by the side-by-side toggle",
+  VR_LOG_INFO("renderer hooks %s (depth downsample diagnostic: %d stereo call(s), re-armed by the side-by-side "
+              "toggle)",
               ok ? "installed" : "FAILED", g_logCalls);
 }
 
 void Rearm() { g_remaining = g_logCalls; }
 
-}  // namespace rm::depth_downsample_diag
+}  // namespace rm::renderer_hooks
