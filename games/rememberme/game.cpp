@@ -4,6 +4,7 @@
 
 #include "device_state_hooks.h"
 #include "draw_fixes.h"
+#include "mirror.h"
 #include "renderer_hooks.h"
 #include "scene_view_hooks.h"
 #include "sensen_stereo.h"
@@ -47,6 +48,9 @@ class RememberMe final : public vrcore::Game {
     vrcore::scene_tap::Enable(vrEnabled_ && sceneSource);
     // Stereo frames: UI (laid out in the left view's rect) to its own panel.
     vrcore::scene_tap::EnableUiRedirect(vrEnabled_ && sceneSource && config.GetBool("VR", "UiPanel", true));
+    // ...and still draw it into the window, so the monitor mirror shows the UI.
+    vrcore::scene_tap::EnableUiMirror(config.GetBool("VR", "MirrorUi", true));
+    rm::mirror::Configure(config);
     ue3Discover_ = config.GetBool("UE3", "Discover", true);
     ue3DumpOnStart_ = config.GetBool("UE3", "DumpObjectsOnStart", true);
     ue3DumpKey_ = config.GetInt("UE3", "DumpObjectsKey", 0x78);  // F9
@@ -99,7 +103,10 @@ class RememberMe final : public vrcore::Game {
     }
   }
 
-  void OnBeforeReset(IDirect3DDevice9*) override { compositor_.OnDeviceChanged(); }
+  void OnBeforeReset(IDirect3DDevice9*) override {
+    compositor_.OnDeviceChanged();
+    rm::mirror::ReleaseDeviceResources();
+  }
 
   void OnPresent(IDirect3DDevice9* device) override {
     if (ue3DumpKey_) {
@@ -115,6 +122,8 @@ class RememberMe final : public vrcore::Game {
       }
       sbsKeyDown_ = down;
     }
+    rm::renderer_hooks::ViewRect left{}, right{};
+    const bool stereoFrame = rm::renderer_hooks::StereoViewRects(left, right);
     rm::sensen_stereo::EndFrame();
     rm::renderer_hooks::EndFrame();
     if (vrEnabled_) {
@@ -123,6 +132,8 @@ class RememberMe final : public vrcore::Game {
       compositor_.OnPresent(device, scene, ui);
       if (scene) scene->Release();
       if (ui) ui->Release();
+      // After the compositor copied the eyes (possibly from the backbuffer).
+      rm::mirror::OnPresent(device, stereoFrame && compositor_.StereoActive());
     }
     ++frames_;
     if (presentLogInterval_ > 0 && frames_ % static_cast<uint64_t>(presentLogInterval_) == 0) {

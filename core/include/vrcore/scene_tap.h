@@ -22,6 +22,9 @@ namespace vrcore::scene_tap {
 // Must be enabled before the D3D9 device is created (installs draw hooks).
 void Enable(bool enable);
 void EnableUiRedirect(bool enable);
+// With the UI redirect: also draw each redirected UI draw into the backbuffer
+// (where the game put it), so the window still shows the UI.
+void EnableUiMirror(bool enable);
 bool Enabled();
 
 // Presenting thread, before the original Present: textures recorded this

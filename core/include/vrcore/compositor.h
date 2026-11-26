@@ -74,6 +74,9 @@ class Compositor {
   // Game thread: the frame was rendered with `frame`; the next Present submits it.
   void SubmitStereoFrame(const StereoFrame& frame);
 
+  // True while the OpenXR session runs in stereo mode (frames can be stereo).
+  bool StereoActive() const { return stereoReady_.load(); }
+
   // Recommended per-eye resolution (0 until the session exists).
   uint32_t EyeWidth() const { return eyeWidth_; }
   uint32_t EyeHeight() const { return eyeHeight_; }

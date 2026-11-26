@@ -11,7 +11,7 @@ Status as of 2026-11-26. Stereo, depth, head tracking and resolution work (M3 pa
 | C | Blue/shadow wedge on Nilin; puddle reflection band | right | Probably the same cause as A: no water-reflection issues seen with the fix (2026-11-26, brief flat test). Recheck the wedge on Nilin and puddles in VR |
 | D | Sensen AR hints: left eye only, misplaced, follow head roll | left | **Fixed** (confirmed in game 2026-11-26, flat test): per-eye redraw from the game camera, both views composited (`[Stereo] SensenStereo`), see "Artifact D" below |
 | E | Loading screen shows the level around the tips panel | both | **Fixed** (confirmed in game 2026-11-26): mono (flat panel) while `ExamplePlayerController.bOnLoadingScreen` is set (`[VR] FlatLoadingScreens`), see below |
-| F | Monitor mirror has no UI in stereo frames | — | Open |
+| F | Monitor mirror has no UI in stereo frames | — | **Built, untested in game:** UI drawn into the window too, window shows the left eye in VR (`[VR] MirrorUi`, `MirrorView`), see below |
 | G | Smoke particles cut off, depth fog with a hard mask | right | **Fixed** (confirmed in game 2026-11-26, flat test, f90a807): per-view scene-colour copy sampled the wrong region (below). `[Stereo] FixQuadTextureSize` |
 
 ## Reproduce and capture without VR
@@ -100,6 +100,14 @@ During loading the game keeps rendering the level being streamed in, and a white
 - Signal: **`ExamplePlayerController.bOnLoadingScreen`** (packed bool in the word at +0x6E8, with `bOnMainMenu`, `bSignInFromPressStart`, `bIsTutoOpen`, `bShouldTogglePause`). Alternatives seen in the type dump: `PauseMenu.bLoadingScreenMode` / `SensenMenu.bLoadingScreenMode` (+0x240), `GameEngine.bStartedLoadMapMovie`, `WorldInfo.bRequestedBlockOnAsyncLoading`.
 - `vrcore::ue3::Reflection::BoolProperty` resolves a bool's word offset and bit (`UBoolProperty::BitMask`, the first field after `UProperty`, like `UObjectProperty::PropertyClass` at +0x80).
 - **Fix (confirmed in game 2026-11-26):** `[VR] FlatLoadingScreens=1`. The `CalcSceneView` hook reads the flag from `LocalPlayer.Actor` each frame; while set, the frame renders mono (no eye views, no stereo frame), so the compositor shows its flat panel with the game's normal image (tips panel covering the level, as on a monitor), and the F10 test stays mono. The log prints the flag's location at startup and "loading screen on/off" on every change.
+
+## Artifact F: monitor mirror (2026-11-26)
+
+In stereo frames every UI draw goes to the UI texture (its own VR panel), so the window showed the scene without UI, and in VR it showed both eyes side by side.
+
+**Built, untested in game:**
+- `[VR] MirrorUi=1` (`vrcore::scene_tap::EnableUiMirror`): each redirected UI draw is drawn a second time into the backbuffer, where the game put it (the left view's rect), with the game's own blending (the premultiplied-alpha patch only applies to the UI texture). The F10 flat test shows its UI again too.
+- `[VR] MirrorView=left|stereo` (`games/rememberme/mirror.cpp`): while VR runs in stereo (`Compositor::StereoActive()` and a two-view frame), `left` rearranges the backbuffer after the compositor has copied the eyes: the left half (left eye + UI) is copied to a temporary surface, the backbuffer cleared to black and the left half put back centred (pillarboxed; `StretchRect`/`ColorFill` ignore the game's state). `stereo` keeps both eyes. Mono frames and the F10 test are unchanged.
 
 ## Artifact B: notes
 

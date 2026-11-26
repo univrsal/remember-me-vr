@@ -49,6 +49,7 @@ IDirect3DTexture9* g_scene = nullptr;
 IDirect3DBaseTexture9* g_sceneIdentity = nullptr;  // for recognising the copy draws
 
 DrawObserver g_observer = nullptr;
+bool g_uiMirror = false;  // also draw redirected UI into the backbuffer
 thread_local bool t_inObserver = false;  // no re-entry while an observer adds draws
 
 IDirect3DTexture9* g_ui = nullptr;  // our render target (D3DPOOL_DEFAULT)
@@ -212,62 +213,84 @@ bool Notify(IDirect3DDevice9* device, const DrawScope& scope, const DrawCall& ca
   return handled;
 }
 
-HRESULT STDMETHODCALLTYPE HookDrawPrimitive(IDirect3DDevice9* self, D3DPRIMITIVETYPE type, UINT start, UINT count) {
-  DrawScope scope(self);
-  if (g_observer) {
-    DrawCall call{DrawCall::Kind::Primitive, type};
-    call.start = start;
-    call.count = count;
-    if (Notify(self, scope, call)) return D3D_OK;
+// A UI draw just went to the UI target: draw it into the backbuffer as well,
+// where the game put it (the left view's rect), with the game's own blending,
+// so the window shows the UI too. Leaves the UI target bound for the next draw.
+void MirrorUi(IDirect3DDevice9* device, DrawScope& scope, const DrawCall& call) {
+  using GetViewport_t = HRESULT(STDMETHODCALLTYPE*)(IDirect3DDevice9*, D3DVIEWPORT9*);
+  using SetViewport_t = HRESULT(STDMETHODCALLTYPE*)(IDirect3DDevice9*, const D3DVIEWPORT9*);
+  using SetRenderState_t = HRESULT(STDMETHODCALLTYPE*)(IDirect3DDevice9*, D3DRENDERSTATETYPE, DWORD);
+  if (!g_backbuffer || !g_uiSurface) return;
+  D3DVIEWPORT9 vp{};
+  if (FAILED(VFn<GetViewport_t>(device, kGetViewport)(device, &vp))) return;
+  if (scope.blendPatched) {
+    auto set = VFn<SetRenderState_t>(device, kSetRenderState);
+    set(device, D3DRS_SEPARATEALPHABLENDENABLE, scope.separate);
+    set(device, D3DRS_SRCBLENDALPHA, scope.srcAlpha);
+    set(device, D3DRS_DESTBLENDALPHA, scope.dstAlpha);
+    scope.blendPatched = false;  // restored now
   }
-  return g_origDrawPrimitive(self, type, start, count);
+  auto setViewport = VFn<SetViewport_t>(device, kSetViewport);
+  g_origSetRenderTarget(device, 0, g_backbuffer);  // resets the viewport
+  setViewport(device, &vp);
+  call.Reissue(device);
+  g_origSetRenderTarget(device, 0, g_uiSurface);
+  setViewport(device, &vp);
+}
+
+// Shared by the draw hooks: observer, the game's draw, UI mirror.
+template <typename Draw>
+HRESULT Dispatch(IDirect3DDevice9* device, const DrawCall& call, Draw&& draw) {
+  DrawScope scope(device);
+  if (g_observer && Notify(device, scope, call)) return D3D_OK;
+  const HRESULT hr = draw();
+  if (scope.ui && g_uiMirror) MirrorUi(device, scope, call);
+  return hr;
+}
+
+HRESULT STDMETHODCALLTYPE HookDrawPrimitive(IDirect3DDevice9* self, D3DPRIMITIVETYPE type, UINT start, UINT count) {
+  DrawCall call{DrawCall::Kind::Primitive, type};
+  call.start = start;
+  call.count = count;
+  return Dispatch(self, call, [&] { return g_origDrawPrimitive(self, type, start, count); });
 }
 
 HRESULT STDMETHODCALLTYPE HookDrawIndexedPrimitive(IDirect3DDevice9* self, D3DPRIMITIVETYPE type, INT base,
                                                    UINT minIndex, UINT numVertices, UINT start, UINT count) {
-  DrawScope scope(self);
-  if (g_observer) {
-    DrawCall call{DrawCall::Kind::IndexedPrimitive, type};
-    call.baseVertex = base;
-    call.minIndex = minIndex;
-    call.numVertices = numVertices;
-    call.start = start;
-    call.count = count;
-    if (Notify(self, scope, call)) return D3D_OK;
-  }
-  return g_origDrawIndexedPrimitive(self, type, base, minIndex, numVertices, start, count);
+  DrawCall call{DrawCall::Kind::IndexedPrimitive, type};
+  call.baseVertex = base;
+  call.minIndex = minIndex;
+  call.numVertices = numVertices;
+  call.start = start;
+  call.count = count;
+  return Dispatch(self, call,
+                  [&] { return g_origDrawIndexedPrimitive(self, type, base, minIndex, numVertices, start, count); });
 }
 
 HRESULT STDMETHODCALLTYPE HookDrawPrimitiveUP(IDirect3DDevice9* self, D3DPRIMITIVETYPE type, UINT count,
                                               const void* data, UINT stride) {
-  DrawScope scope(self);
-  if (g_observer) {
-    DrawCall call{DrawCall::Kind::PrimitiveUP, type};
-    call.count = count;
-    call.vertices = data;
-    call.stride = stride;
-    if (Notify(self, scope, call)) return D3D_OK;
-  }
-  return g_origDrawPrimitiveUP(self, type, count, data, stride);
+  DrawCall call{DrawCall::Kind::PrimitiveUP, type};
+  call.count = count;
+  call.vertices = data;
+  call.stride = stride;
+  return Dispatch(self, call, [&] { return g_origDrawPrimitiveUP(self, type, count, data, stride); });
 }
 
 HRESULT STDMETHODCALLTYPE HookDrawIndexedPrimitiveUP(IDirect3DDevice9* self, D3DPRIMITIVETYPE type, UINT minIndex,
                                                      UINT numVertices, UINT count, const void* indices,
                                                      D3DFORMAT indexFormat, const void* vertices, UINT stride) {
-  DrawScope scope(self);
-  if (g_observer) {
-    DrawCall call{DrawCall::Kind::IndexedPrimitiveUP, type};
-    call.minIndex = minIndex;
-    call.numVertices = numVertices;
-    call.count = count;
-    call.indices = indices;
-    call.indexFormat = indexFormat;
-    call.vertices = vertices;
-    call.stride = stride;
-    if (Notify(self, scope, call)) return D3D_OK;
-  }
-  return g_origDrawIndexedPrimitiveUP(self, type, minIndex, numVertices, count, indices, indexFormat, vertices,
-                                      stride);
+  DrawCall call{DrawCall::Kind::IndexedPrimitiveUP, type};
+  call.minIndex = minIndex;
+  call.numVertices = numVertices;
+  call.count = count;
+  call.indices = indices;
+  call.indexFormat = indexFormat;
+  call.vertices = vertices;
+  call.stride = stride;
+  return Dispatch(self, call, [&] {
+    return g_origDrawIndexedPrimitiveUP(self, type, minIndex, numVertices, count, indices, indexFormat, vertices,
+                                        stride);
+  });
 }
 
 }  // namespace
@@ -296,6 +319,7 @@ HRESULT DrawPrimitiveUPDirect(IDirect3DDevice9* device, D3DPRIMITIVETYPE type, U
   return g_origDrawPrimitiveUP(device, type, count, vertices, stride);
 }
 void EnableUiRedirect(bool enable) { g_uiEnabled = enable; }
+void EnableUiMirror(bool enable) { g_uiMirror = enable; }
 bool Enabled() { return g_enabled; }
 
 IDirect3DTexture9* Take() {
