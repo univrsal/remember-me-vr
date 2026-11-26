@@ -19,6 +19,18 @@ struct Layout {
   uint32_t objOuter = 0;        // UObject::Outer
   uint32_t objName = 0;         // UObject::Name (FName: int32 index, int32 number)
   uint32_t objClass = 0;        // UObject::Class
+
+  // Struct/property layout (DiscoverTypes), calibrated on Core.Object's own
+  // script properties, whose offsets are known from the UObject layout above.
+  uint32_t fieldNext = 0;       // UField::Next
+  uint32_t structSuper = 0;     // UStruct::SuperField
+  uint32_t structChildren = 0;  // UStruct::Children
+  uint32_t structSize = 0;      // UStruct::PropertySize
+  uint32_t propArrayDim = 0;    // UProperty::ArrayDim
+  uint32_t propElementSize = 0; // UProperty::ElementSize
+  uint32_t propOffset = 0;      // UProperty::Offset
+  uint32_t propClass = 0;       // UObjectProperty::PropertyClass
+  uint32_t propStruct = 0;      // UStructProperty::Struct
 };
 
 class Reflection {
@@ -43,10 +55,23 @@ class Reflection {
   // Writes "index address fullname" for every live object. Returns the count, -1 on error.
   int DumpObjects(const wchar_t* path) const;
 
+  // Detects UField/UStruct/UProperty offsets. Requires Discover().
+  bool DiscoverTypes();
+  bool TypesValid() const { return layout_.propOffset != 0; }
+
+  // Property lookup: offset of `property` in `className` ("Class Engine.Camera"
+  // or "ScriptStruct Core.Object.Vector"), searching super classes too. -1 if missing.
+  int32_t PropertyOffset(const std::string& structFullName, const std::string& property) const;
+
+  // Writes every class and script struct with its properties (offset, size,
+  // type) and function names. Returns the number of structs, -1 on error.
+  int DumpTypes(const wchar_t* path) const;
+
  private:
   bool FindNames();
   bool FindObjects();
   bool DetectObjectFields(uintptr_t data, int32_t num);
+  std::string PropertyType(uintptr_t property) const;
 
   Layout layout_;
 };

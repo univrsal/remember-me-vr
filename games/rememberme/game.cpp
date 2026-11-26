@@ -44,7 +44,10 @@ class RememberMe final : public vrcore::Game {
                 dxvk ? "DXVK interop available" : "no DXVK interop");
     if (!dxvk) VR_LOG_WARN("VR output needs DXVK's d3d9.dll (Proton's default, or dxvk next to the exe on Windows)");
     // The exe is unpacked and the engine initialised by now: map UE3's reflection.
-    if (ue3Discover_ && !reflection_.Valid() && reflection_.Discover() && ue3DumpOnStart_) DumpObjects("start");
+    if (ue3Discover_ && !reflection_.Valid() && reflection_.Discover()) {
+      reflection_.DiscoverTypes();
+      if (ue3DumpOnStart_) DumpObjects("start");
+    }
   }
 
   void OnBeforeReset(IDirect3DDevice9*) override { screen_.OnDeviceChanged(); }
@@ -69,6 +72,11 @@ class RememberMe final : public vrcore::Game {
     const std::wstring path = vrcore::ModDirectory() + L"RememberMeVR_objects.txt";
     const int count = reflection_.DumpObjects(path.c_str());
     VR_LOG_INFO("ue3: dumped %d objects (%s) to %s", count, why, vrcore::Narrow(path).c_str());
+    if (reflection_.TypesValid()) {
+      const std::wstring typesPath = vrcore::ModDirectory() + L"RememberMeVR_types.txt";
+      const int structs = reflection_.DumpTypes(typesPath.c_str());
+      VR_LOG_INFO("ue3: dumped %d classes/structs (%s) to %s", structs, why, vrcore::Narrow(typesPath).c_str());
+    }
   }
 
   bool knownBuild_ = false;
