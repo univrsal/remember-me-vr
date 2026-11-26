@@ -4,6 +4,7 @@
 
 #include "device_state_hooks.h"
 #include "draw_fixes.h"
+#include "engine.h"
 #include "mirror.h"
 #include "renderer_hooks.h"
 #include "scene_view_hooks.h"
@@ -11,6 +12,7 @@
 #include "vrcore/compositor.h"
 #include "vrcore/game.h"
 #include "vrcore/log.h"
+#include "vrcore/memory.h"
 #include "vrcore/process.h"
 #include "vrcore/scene_tap.h"
 #include "vrcore/ue3.h"
@@ -55,6 +57,7 @@ class RememberMe final : public vrcore::Game {
     ue3DumpOnStart_ = config.GetBool("UE3", "DumpObjectsOnStart", true);
     ue3DumpKey_ = config.GetInt("UE3", "DumpObjectsKey", 0x78);  // F9
     engineHooks_ = config.GetBool("Stereo", "EngineHooks", true);
+    disableMotionBlur_ = config.GetBool("VR", "DisableMotionBlur", true);
     sceneViews_.Configure(config, vrEnabled_ ? &compositor_ : nullptr);
     rm::renderer_hooks::Configure(config);
     rm::sensen_stereo::Configure(config);
@@ -132,6 +135,7 @@ class RememberMe final : public vrcore::Game {
       }
       sbsKeyDown_ = down;
     }
+    if (disableMotionBlur_ && engineHooksInstalled_) DisableMotionBlur();
     rm::renderer_hooks::ViewRect left{}, right{};
     const bool stereoFrame = rm::renderer_hooks::StereoViewRects(left, right);
     rm::sensen_stereo::EndFrame();
@@ -154,6 +158,20 @@ class RememberMe final : public vrcore::Game {
   void OnDetach() override { VR_LOG_INFO("frames presented: %" PRIu64, frames_); }
 
  private:
+  // GSystemSettings.bAllowMotionBlur = false, kept that way every frame (the
+  // game may reapply its settings, e.g. after a resolution change).
+  void DisableMotionBlur() {
+    const uintptr_t address =
+        reinterpret_cast<uintptr_t>(vrcore::Exe().FromPreferredVA(rm::kSystemSettings)) + rm::kSystemSettingsAllowMotionBlur;
+    uint32_t value = 0;
+    if (!vrcore::mem::Read(address, value)) return;
+    if (!motionBlurLogged_) {
+      motionBlurLogged_ = true;
+      VR_LOG_INFO("motion blur: GSystemSettings.bAllowMotionBlur was %u; disabled", value);
+    }
+    if (value != 0) *reinterpret_cast<volatile uint32_t*>(address) = 0;
+  }
+
   void DumpObjects(const char* why) {
     const std::wstring path = vrcore::ModDirectory() + L"RememberMeVR_objects.txt";
     const int count = reflection_.DumpObjects(path.c_str());
@@ -172,6 +190,8 @@ class RememberMe final : public vrcore::Game {
   bool dumpKeyDown_ = false;
   vrcore::ue3::Reflection reflection_;
   bool engineHooks_ = true;
+  bool disableMotionBlur_ = true;
+  bool motionBlurLogged_ = false;
   bool engineHooksInstalled_ = false;
   bool sbsKeyDown_ = false;
   rm::SceneViewHooks sceneViews_;

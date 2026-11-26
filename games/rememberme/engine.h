@@ -72,6 +72,13 @@ constexpr uint8_t kAllocateViewStatePrologueA[] = {0x6A, 0xFF, 0x68};
 constexpr uint32_t kAllocateViewStatePrologueBOffset = 7;
 constexpr uint8_t kAllocateViewStatePrologueB[] = {0x64, 0xA1, 0x00, 0x00, 0x00, 0x00, 0x50, 0x51};
 
+// GSystemSettings (FSystemSettings, static data): the [SystemSettings] INI
+// values. Its name -> field table is built in FUN_005F21F0 (called with
+// ECX = this): "MotionBlur" -> bAllowMotionBlur (UBOOL) at +0x38,
+// "MotionBlurPause" +0x3C, "DirectionalLightmaps" +0x34.
+constexpr uint32_t kSystemSettings = 0x0162EE28;
+constexpr uint32_t kSystemSettingsAllowMotionBlur = 0x38;
+
 // ULocalPlayer fields.
 constexpr uint32_t kLocalPlayerActor = 0x40;      // PlayerController*
 constexpr uint32_t kLocalPlayerOrigin = 0x6C;     // FVector2D, viewport fraction

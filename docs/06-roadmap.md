@@ -72,6 +72,7 @@ Each milestone reduces the risk of the next one. **Milestone 3 is the go/no-go g
 
 - [ ] Bink FMV cinema mode; decide how to handle in-engine cutscenes (stereo with the camera locked, or a theatre view)
 - [ ] Comfort: no roll or shakes; world scale; recentre; INI config
+- [ ] Motion blur off in VR (built, untested): `[VR] DisableMotionBlur=1` clears `GSystemSettings.bAllowMotionBlur` (`0x0162EE28 + 0x38`, found through the `[SystemSettings]` name table in `FUN_005F21F0`) every frame; `UberPostProcessEffect`'s proxy creation (`FUN_00641940`) checks it
 - [ ] 2D UI on its own panel (built, untested): in stereo frames, every backbuffer draw after the scene copy that doesn't sample the scene image is UI laid out in the left view's rect. It's redirected into a transparent texture of that size (premultiplied alpha via separate alpha blend, restored per draw) and submitted as a quad layer over the stereo projection layer. Mono frames are untouched. Monitor mirror: UI drawn into the window too and the left eye shown in VR (`[VR] MirrorUi`, `MirrorView`; see 09 "Artifact F"; confirmed 2026-11-26)
 - [x] Sensen AR hints rendered per eye (`[Stereo] SensenStereo`, see 09 "Artifact D"; confirmed 2026-11-26). Also fixed: temporary view families (screen-bounds checks, DeProject) no longer start extra stereo frames
 - [ ] UI panel test (2026-11-26): works for the most part. Open issues:
