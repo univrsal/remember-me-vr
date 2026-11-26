@@ -56,15 +56,13 @@ Each milestone reduces the risk of the next one. **Milestone 3 is the go/no-go g
   - `vrcore::Compositor` replaces `VirtualScreen`. The game thread calls `BeginStereoFrame` (OpenXR eye poses + FOVs predicted one display period after the last `xrWaitFrame`), renders, then `SubmitStereoFrame`. The next `Present` submits the backbuffer halves as a projection layer with exactly those poses. Frames without stereo data (loading screens, videos) fall back to the flat panel.
   - Per eye, `CalcSceneView` runs with its viewport half, view state, eye pose (`eventGetPlayerViewPoint` hook: game camera, yaw only by default, plus tracked eye pose; world scale configurable) and asymmetric projection (`FPerspectiveMatrix` hook, x/y terms replaced, depth terms kept).
   - Conversions are in `vrcore/ue3_space` with a host unit test (`tools/space-test.sh`, run in CI).
-- [ ] Capture both eyes; suppress the first present; submit both eyes in one OpenXR projection layer with matching poses
-- [ ] Head tracking applied to the view only
-- [ ] Check the side effects of drawing twice (HUD script, counters, scene captures)
+- [ ] Verify in the headset: correct stereo depth/scale, head tracking (view only), recenter, frame pacing
+- [ ] Tune defaults: world scale, camera orientation mode
 - **Exit criteria:** correct, comfortable stereo while walking and fighting in one chapter, at the HMD's refresh rate or with stable reprojection. Both eyes always from the same tick.
-- **Go/no-go:** if S1 is blocked by engine internals, try S2 (two views per family) before stopping. Shader-level stereo is the very last thing to consider (see 03).
+- **Go/no-go:** S2 (two views per family) is implemented; if it proves unusable in the headset, fall back to S1 (draw the viewport twice per tick). Shader-level stereo is the very last thing to consider (see 03).
 
 ## M4 — Usable mod
 
-- [ ] HUD and menus redirected to a quad layer
 - [ ] Bink FMV cinema mode; decide how to handle in-engine cutscenes (stereo with the camera locked, or a theatre view)
 - [ ] Comfort: no roll or shakes; world scale; recentre; INI config
 - [ ] 2D UI (menus/HUD) to a full-size HUD texture on a quad layer (currently laid out in the left eye's rect, see 08)
