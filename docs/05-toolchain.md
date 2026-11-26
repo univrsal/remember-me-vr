@@ -62,7 +62,7 @@ Notes:
 | Task | Tool | Linux? |
 |---|---|---|
 | Unpack SteamStub for static analysis | Steamless v3.1.0.5 in `tools/steamless/` (gitignored) | **Done.** Runs under mono: `MONO_PATH=tools/steamless/Plugins mono tools/steamless/Steamless.CLI.exe re/RememberMe.exe`. Always work on a copy, never the installed exe. **The unpacked exe stays local; never commit or distribute it.** |
-| Disassembly/decompile | Ghidra (installed), r2 | Yes. Keep Ghidra projects in `re/` (gitignored) |
+| Disassembly/decompile | Ghidra 12.2 (installed), r2 | Yes. Project in `re/ghidra/` (gitignored). Headless import + analysis + native labelling (needs a bigger heap than the 2 GB default, which runs out on this exe):<br>`GHIDRA_HEADLESS_MAXMEM=12G /opt/ghidra/support/analyzeHeadless re/ghidra RememberMe -import re/RememberMe.exe.unpacked.exe -overwrite -scriptPath tools/ghidra -postScript LabelUE3Natives.java` |
 | Script decompile (.upk) | UE Explorer | .NET WinForms. Usually works under Wine; if not, it's a reason to use Windows. |
 | Runtime debugger | x32dbg under Wine (mostly works); `winedbg --gdb` + gdb | Yes, a bit rough |
 | Frame capture | RenderDoc (installed) on the Vulkan side (DXVK) | Yes. Labels come from DXVK, not the game. For scripted analysis: `renderdoccmd convert -c xml` (see 07). `*.rdc` is gitignored |

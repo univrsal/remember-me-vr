@@ -45,11 +45,12 @@ bool Reflection::DiscoverTypes() {
       {"Class Engine.Pawn", 0},
       {"ObjectProperty Core.Object.Outer", 0},
       {"NameProperty Core.Object.Name", 0},
-      {"ObjectProperty Core.Object.Class", 0},
+      {"ClassProperty Core.Object.Class", 0},  // `class` variables are ClassProperty (a UObjectProperty subclass)
       {"StructProperty Engine.Actor.Location", 0},
       {"ScriptStruct Core.Object.Vector", 0},
   };
-  const std::set<std::string> classes = {"Class", "ObjectProperty", "NameProperty", "StructProperty", "ScriptStruct"};
+  const std::set<std::string> classes = {"Class", "ObjectProperty", "ClassProperty", "NameProperty", "StructProperty",
+                                         "ScriptStruct"};
   const int32_t count = ObjectCount();
   for (int32_t i = 0; i < count; ++i) {
     const uintptr_t object = Object(i);
@@ -67,7 +68,7 @@ bool Reflection::DiscoverTypes() {
   const uintptr_t actor = want["Class Engine.Actor"], pawn = want["Class Engine.Pawn"];
   const uintptr_t pOuter = want["ObjectProperty Core.Object.Outer"];
   const uintptr_t pName = want["NameProperty Core.Object.Name"];
-  const uintptr_t pClass = want["ObjectProperty Core.Object.Class"];
+  const uintptr_t pClass = want["ClassProperty Core.Object.Class"];
   const uintptr_t pLocation = want["StructProperty Engine.Actor.Location"];
   const uintptr_t vectorStruct = want["ScriptStruct Core.Object.Vector"];
 
