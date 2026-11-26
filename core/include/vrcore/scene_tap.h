@@ -50,11 +50,12 @@ struct DrawCall {
   HRESULT Reissue(IDirect3DDevice9* device, const void* otherVertices = nullptr) const;
 };
 
-// Called on the drawing thread after every draw that wasn't redirected into
-// the UI texture (i.e. scene and offscreen work), with the device state the
-// draw used still bound. The observer may change state and Reissue() the draw
-// (e.g. for another view), but must restore the state it changed. One observer.
-using DrawObserver = void (*)(IDirect3DDevice9* device, const DrawCall& call);
+// Called on the drawing thread before every draw that isn't redirected into
+// the UI texture (i.e. scene and offscreen work), with the draw's state bound.
+// The observer may change state, add draws and Reissue() the draw (e.g. once
+// per view), but must restore the state it changed. Returning true means the
+// observer issued everything itself and the game's draw is skipped. One observer.
+using DrawObserver = bool (*)(IDirect3DDevice9* device, const DrawCall& call);
 void SetDrawObserver(DrawObserver observer);
 
 // Draws client-memory vertices bypassing the hooks (for observers adding draws).

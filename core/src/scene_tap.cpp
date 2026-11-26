@@ -203,29 +203,29 @@ HRESULT STDMETHODCALLTYPE HookSetRenderTarget(IDirect3DDevice9* self, DWORD inde
   return g_origSetRenderTarget(self, index, surface);
 }
 
-void Notify(IDirect3DDevice9* device, const DrawScope& scope, const DrawCall& call) {
-  if (!g_observer || scope.ui || t_inObserver) return;
+// True if the observer handled the draw (the game's draw is skipped).
+bool Notify(IDirect3DDevice9* device, const DrawScope& scope, const DrawCall& call) {
+  if (!g_observer || scope.ui || t_inObserver) return false;
   t_inObserver = true;
-  g_observer(device, call);
+  const bool handled = g_observer(device, call);
   t_inObserver = false;
+  return handled;
 }
 
 HRESULT STDMETHODCALLTYPE HookDrawPrimitive(IDirect3DDevice9* self, D3DPRIMITIVETYPE type, UINT start, UINT count) {
   DrawScope scope(self);
-  const HRESULT hr = g_origDrawPrimitive(self, type, start, count);
   if (g_observer) {
     DrawCall call{DrawCall::Kind::Primitive, type};
     call.start = start;
     call.count = count;
-    Notify(self, scope, call);
+    if (Notify(self, scope, call)) return D3D_OK;
   }
-  return hr;
+  return g_origDrawPrimitive(self, type, start, count);
 }
 
 HRESULT STDMETHODCALLTYPE HookDrawIndexedPrimitive(IDirect3DDevice9* self, D3DPRIMITIVETYPE type, INT base,
                                                    UINT minIndex, UINT numVertices, UINT start, UINT count) {
   DrawScope scope(self);
-  const HRESULT hr = g_origDrawIndexedPrimitive(self, type, base, minIndex, numVertices, start, count);
   if (g_observer) {
     DrawCall call{DrawCall::Kind::IndexedPrimitive, type};
     call.baseVertex = base;
@@ -233,31 +233,28 @@ HRESULT STDMETHODCALLTYPE HookDrawIndexedPrimitive(IDirect3DDevice9* self, D3DPR
     call.numVertices = numVertices;
     call.start = start;
     call.count = count;
-    Notify(self, scope, call);
+    if (Notify(self, scope, call)) return D3D_OK;
   }
-  return hr;
+  return g_origDrawIndexedPrimitive(self, type, base, minIndex, numVertices, start, count);
 }
 
 HRESULT STDMETHODCALLTYPE HookDrawPrimitiveUP(IDirect3DDevice9* self, D3DPRIMITIVETYPE type, UINT count,
                                               const void* data, UINT stride) {
   DrawScope scope(self);
-  const HRESULT hr = g_origDrawPrimitiveUP(self, type, count, data, stride);
   if (g_observer) {
     DrawCall call{DrawCall::Kind::PrimitiveUP, type};
     call.count = count;
     call.vertices = data;
     call.stride = stride;
-    Notify(self, scope, call);
+    if (Notify(self, scope, call)) return D3D_OK;
   }
-  return hr;
+  return g_origDrawPrimitiveUP(self, type, count, data, stride);
 }
 
 HRESULT STDMETHODCALLTYPE HookDrawIndexedPrimitiveUP(IDirect3DDevice9* self, D3DPRIMITIVETYPE type, UINT minIndex,
                                                      UINT numVertices, UINT count, const void* indices,
                                                      D3DFORMAT indexFormat, const void* vertices, UINT stride) {
   DrawScope scope(self);
-  const HRESULT hr = g_origDrawIndexedPrimitiveUP(self, type, minIndex, numVertices, count, indices, indexFormat,
-                                                  vertices, stride);
   if (g_observer) {
     DrawCall call{DrawCall::Kind::IndexedPrimitiveUP, type};
     call.minIndex = minIndex;
@@ -267,9 +264,10 @@ HRESULT STDMETHODCALLTYPE HookDrawIndexedPrimitiveUP(IDirect3DDevice9* self, D3D
     call.indexFormat = indexFormat;
     call.vertices = vertices;
     call.stride = stride;
-    Notify(self, scope, call);
+    if (Notify(self, scope, call)) return D3D_OK;
   }
-  return hr;
+  return g_origDrawIndexedPrimitiveUP(self, type, minIndex, numVertices, count, indices, indexFormat, vertices,
+                                      stride);
 }
 
 }  // namespace

@@ -5,6 +5,8 @@
 #include <cmath>
 #include <cstdint>
 #include <cstring>
+#include <mutex>
+#include <utility>
 
 #include "device_state_hooks.h"
 #include "engine.h"
@@ -15,13 +17,17 @@
 namespace rm::sensen_stereo {
 namespace {
 
+using vrcore::scene_tap::DrawCall;
+
 // IDirect3DDevice9 vtable slots used to change and restore state around the
 // added draws (calling through the vtable keeps device_state's tracking right).
-constexpr size_t kSetViewport = 47;
-constexpr size_t kGetRenderTarget = 38;
 constexpr size_t kGetBackBuffer = 18;
+constexpr size_t kGetRenderTarget = 38;
+constexpr size_t kSetViewport = 47;
 constexpr size_t kSetVertexShaderConstantF = 94;
 constexpr size_t kGetVertexShaderConstantF = 95;
+constexpr size_t kSetStreamSource = 100;
+constexpr size_t kGetStreamSource = 101;
 
 using Mat = double[4][4];
 
@@ -31,16 +37,30 @@ struct ViewData {
   float proj[16]{};  // ProjectionMatrix
 };
 
+struct GameCamera {
+  bool valid = false;
+  float key[16]{};  // left-eye ViewMatrix of the frame
+  float view[16]{};
+  float proj[16]{};
+};
+
 bool g_enabled = true;
 bool g_installed = false;
 
+// Game thread -> render thread: the last few frames' game cameras.
+constexpr int kCameraSlots = 8;
+std::mutex g_camerasMutex;
+GameCamera g_cameras[kCameraSlots];
+int g_nextCamera = 0;
+
 // Frame state, touched only on the render thread.
-bool t_stereo = false;   // this frame has two views
-ViewData t_views[2];
-float t_correction[16]{};  // C, row-major
-bool t_compositeDone = false;
-uint64_t g_hintDraws = 0, g_composites = 0;
-bool g_loggedMismatch = false;
+bool g_stereo = false;  // this frame has two views and corrections
+ViewData g_views[2];
+float g_correction[2][16]{};  // C_eye, row-major
+bool g_compositeDone = false;
+uint64_t g_hintDraws = 0, g_composites = 0, g_frames = 0;
+bool g_loggedViewportMismatch = false;
+bool g_loggedNoCamera = false;
 
 template <typename Fn>
 Fn VFn(IDirect3DDevice9* device, size_t slot) {
@@ -90,14 +110,14 @@ bool Invert(const Mat m, Mat out) {
   return true;
 }
 
-// Translated view-projection (camera at the origin) and the view origin.
-bool TranslatedViewProjection(const ViewData& v, Mat tvp, double origin[3]) {
+// Translated view-projection (camera at the origin) and the view origin, from
+// a view matrix (Translate(-origin) x R) and a projection.
+bool TranslatedViewProjection(const float* viewM, const float* projM, Mat tvp, double origin[3]) {
   Mat view, rot, proj;
   for (int i = 0; i < 16; ++i) {
-    view[i / 4][i % 4] = v.view[i];
-    proj[i / 4][i % 4] = v.proj[i];
+    view[i / 4][i % 4] = viewM[i];
+    proj[i / 4][i % 4] = projM[i];
   }
-  // view = Translate(-origin) x R: rows 0..2 hold R, row 3 = -origin x R.
   std::memcpy(rot, view, sizeof(Mat));
   rot[3][0] = rot[3][1] = rot[3][2] = 0.0;
   rot[3][3] = 1.0;
@@ -110,20 +130,21 @@ bool TranslatedViewProjection(const ViewData& v, Mat tvp, double origin[3]) {
   return true;
 }
 
-bool ComputeCorrection() {
-  Mat tvpL, tvpR, invL, shift, c;
-  double oL[3], oR[3];
-  if (!TranslatedViewProjection(t_views[0], tvpL, oL) || !TranslatedViewProjection(t_views[1], tvpR, oR) ||
-      !Invert(tvpL, invL)) {
+// C = inverse(TVP_from) x Translate(origin_from - origin_to) x TVP_to.
+bool Correction(const float* fromView, const float* fromProj, const float* toView, const float* toProj, float* out) {
+  Mat tvpFrom, tvpTo, invFrom, shift, c;
+  double oFrom[3], oTo[3];
+  if (!TranslatedViewProjection(fromView, fromProj, tvpFrom, oFrom) ||
+      !TranslatedViewProjection(toView, toProj, tvpTo, oTo) || !Invert(tvpFrom, invFrom)) {
     return false;
   }
   for (int i = 0; i < 4; ++i) {
     for (int j = 0; j < 4; ++j) shift[i][j] = i == j ? 1.0 : 0.0;
   }
-  for (int j = 0; j < 3; ++j) shift[3][j] = oL[j] - oR[j];
-  Mul(invL, shift, c);
-  Mul(c, tvpR, c);
-  for (int i = 0; i < 16; ++i) t_correction[i] = static_cast<float>(c[i / 4][i % 4]);
+  for (int j = 0; j < 3; ++j) shift[3][j] = oFrom[j] - oTo[j];
+  Mul(invFrom, shift, c);
+  Mul(c, tvpTo, c);
+  for (int i = 0; i < 16; ++i) out[i] = static_cast<float>(c[i / 4][i % 4]);
   return true;
 }
 
@@ -154,119 +175,109 @@ D3DVIEWPORT9 RectViewport(const ViewData& v, const D3DVIEWPORT9& like) {
   return vp;
 }
 
-// A Scaleform hint draw in View[0]'s viewport: draw it again for View[1].
-void DuplicateHint(IDirect3DDevice9* device, const vrcore::scene_tap::DrawCall& call, int reg) {
+void Multiply(const float* t, const float* c, float* out) {
+  for (int i = 0; i < 4; ++i) {
+    for (int j = 0; j < 4; ++j) {
+      float s = 0;
+      for (int k = 0; k < 4; ++k) s += t[i * 4 + k] * c[k * 4 + j];
+      out[i * 4 + j] = s;
+    }
+  }
+}
+
+// A Scaleform hint draw in View[0]'s viewport: draw it once per eye.
+bool DrawHintPerEye(IDirect3DDevice9* device, const DrawCall& call, int reg) {
   using SetViewport_t = HRESULT(STDMETHODCALLTYPE*)(IDirect3DDevice9*, const D3DVIEWPORT9*);
   using ConstF_t = HRESULT(STDMETHODCALLTYPE*)(IDirect3DDevice9*, UINT, const float*, UINT);
   using GetConstF_t = HRESULT(STDMETHODCALLTYPE*)(IDirect3DDevice9*, UINT, float*, UINT);
   float t[16];
-  if (FAILED(VFn<GetConstF_t>(device, kGetVertexShaderConstantF)(device, reg, t, 4))) return;
-  // Perspective hints get the right eye's projection; flat (screen-space)
-  // elements keep their transform and only move to the right view.
-  float tr[16];
+  if (FAILED(VFn<GetConstF_t>(device, kGetVertexShaderConstantF)(device, reg, t, 4))) return false;
+  // Perspective hints get each eye's projection; flat (screen-space)
+  // elements keep their transform and are only repeated in the right view.
   const bool perspective = std::fabs(t[3]) + std::fabs(t[7]) + std::fabs(t[11]) > 1e-9f;
-  if (perspective) {
-    for (int i = 0; i < 4; ++i) {
-      for (int j = 0; j < 4; ++j) {
-        float s = 0;
-        for (int k = 0; k < 4; ++k) s += t[i * 4 + k] * t_correction[k * 4 + j];
-        tr[i * 4 + j] = s;
-      }
-    }
-  } else {
-    std::memcpy(tr, t, sizeof(tr));
-  }
   const D3DVIEWPORT9 saved = device_state::CurrentViewport();
-  const D3DVIEWPORT9 right = RectViewport(t_views[1], saved);
-  VFn<ConstF_t>(device, kSetVertexShaderConstantF)(device, reg, tr, 4);
-  VFn<SetViewport_t>(device, kSetViewport)(device, &right);
-  call.Reissue(device);
-  VFn<SetViewport_t>(device, kSetViewport)(device, &saved);
-  VFn<ConstF_t>(device, kSetVertexShaderConstantF)(device, reg, t, 4);
-  if (g_hintDraws++ == 0) {
-    VR_LOG_INFO("sensen stereo: first hint draw duplicated for the right view (%s transform, viewport %d,%d %dx%d)",
-                perspective ? "perspective" : "flat", t_views[1].x, t_views[1].y, t_views[1].w, t_views[1].h);
-  }
-}
-
-// A composite tile (client-memory quad: float4 clip position, float2 UV):
-// once per frame, also composite the whole right view, with UVs extended
-// from the tile's position-to-UV mapping.
-void AddRightComposite(IDirect3DDevice9* device, const vrcore::scene_tap::DrawCall& call) {
-  using Vertex = float[6];
-  if (call.stride != sizeof(Vertex) || !call.vertices) {
-    if (!g_loggedMismatch) {
-      g_loggedMismatch = true;
-      VR_LOG_INFO("sensen stereo: composite draw with vertex stride %u (expected %u); right view not composited",
-                  call.stride, static_cast<unsigned>(sizeof(Vertex)));
+  auto set = VFn<ConstF_t>(device, kSetVertexShaderConstantF);
+  auto viewport = VFn<SetViewport_t>(device, kSetViewport);
+  float eyeT[16];
+  for (int eye = 0; eye < 2; ++eye) {
+    if (perspective) {
+      Multiply(t, g_correction[eye], eyeT);
+      set(device, reg, eyeT, 4);
     }
-    return;
+    const D3DVIEWPORT9 vp = RectViewport(g_views[eye], saved);
+    viewport(device, &vp);
+    call.Reissue(device);
   }
-  const auto* v = static_cast<const float*>(call.vertices);
-  const UINT n = call.kind == vrcore::scene_tap::DrawCall::Kind::IndexedPrimitiveUP ? call.numVertices + call.minIndex
-                                                                                     : call.count + 2;
-  // Find two vertices that differ in x and two that differ in y.
-  int ix = -1, iy = -1;
-  for (UINT i = 1; i < n && (ix < 0 || iy < 0); ++i) {
-    const float* a = v;
-    const float* b = v + i * 6;
-    if (ix < 0 && std::fabs(b[0] / b[3] - a[0] / a[3]) > 1e-6f) ix = static_cast<int>(i);
-    if (iy < 0 && std::fabs(b[1] / b[3] - a[1] / a[3]) > 1e-6f) iy = static_cast<int>(i);
+  viewport(device, &saved);
+  set(device, reg, t, 4);
+  if (g_hintDraws++ == 0) {
+    VR_LOG_INFO("sensen stereo: first hint draw redrawn per eye (%s transform; right view %d,%d %dx%d)",
+                perspective ? "perspective" : "flat", g_views[1].x, g_views[1].y, g_views[1].w, g_views[1].h);
   }
-  if (ix < 0 || iy < 0) return;
-  const float* a = v;
-  const float* bx = v + ix * 6;
-  const float* by = v + iy * 6;
-  const float su = (bx[4] - a[4]) / (bx[0] / bx[3] - a[0] / a[3]);
-  const float sv = (by[5] - a[5]) / (by[1] / by[3] - a[1] / a[3]);
-  const auto u = [&](float x) { return a[4] + (x - a[0] / a[3]) * su; };
-  const auto vv = [&](float y) { return a[5] + (y - a[1] / a[3]) * sv; };
-  // Right view rect in the composite viewport's clip space.
-  const D3DVIEWPORT9& vp = device_state::CurrentViewport();
-  if (vp.Width == 0 || vp.Height == 0) return;
-  const ViewData& r = t_views[1];
-  const float x0 = (static_cast<float>(r.x) - vp.X) / vp.Width * 2.0f - 1.0f;
-  const float x1 = (static_cast<float>(r.x + r.w) - vp.X) / vp.Width * 2.0f - 1.0f;
-  const float y0 = 1.0f - (static_cast<float>(r.y) - vp.Y) / vp.Height * 2.0f;
-  const float y1 = 1.0f - (static_cast<float>(r.y + r.h) - vp.Y) / vp.Height * 2.0f;
-  const float z = a[2] / a[3];
-  Vertex quad[4] = {
-      {x0, y0, z, 1, u(x0), vv(y0)},
-      {x1, y0, z, 1, u(x1), vv(y0)},
-      {x0, y1, z, 1, u(x0), vv(y1)},
-      {x1, y1, z, 1, u(x1), vv(y1)},
-  };
-  vrcore::scene_tap::DrawPrimitiveUPDirect(device, D3DPT_TRIANGLESTRIP, 2, quad, sizeof(Vertex));
-  if (g_composites++ == 0) {
-    VR_LOG_INFO("sensen stereo: right-view composite quad x %.3f..%.3f y %.3f..%.3f, u %.4f..%.4f v %.4f..%.4f", x0,
-                x1, y0, y1, u(x0), u(x1), vv(y0), vv(y1));
-  }
+  return true;
 }
 
-void OnDraw(IDirect3DDevice9* device, const vrcore::scene_tap::DrawCall& call) {
-  if (!t_stereo) return;
+// The first composite draw of the frame: draw it, then one quad over the right
+// view. The composite's quads map the layer 1:1 onto the viewport (UV = pixel /
+// viewport size) with D3D9's half-pixel offset; vertices are float4 position +
+// float2 UV.
+bool CompositeWithRightView(IDirect3DDevice9* device, const DrawCall& call) {
+  using GetStreamSource_t = HRESULT(STDMETHODCALLTYPE*)(IDirect3DDevice9*, UINT, IDirect3DVertexBuffer9**, UINT*,
+                                                         UINT*);
+  using SetStreamSource_t = HRESULT(STDMETHODCALLTYPE*)(IDirect3DDevice9*, UINT, IDirect3DVertexBuffer9*, UINT, UINT);
+  call.Reissue(device);
   const D3DVIEWPORT9& vp = device_state::CurrentViewport();
+  if (vp.Width == 0 || vp.Height == 0) return true;
+  const float w = static_cast<float>(vp.Width), h = static_cast<float>(vp.Height);
+  const ViewData& r = g_views[1];
+  const float px0 = static_cast<float>(r.x) - vp.X, px1 = px0 + r.w;
+  const float py0 = static_cast<float>(r.y) - vp.Y, py1 = py0 + r.h;
+  const auto x = [&](float px) { return (px - 0.5f) / w * 2.0f - 1.0f; };
+  const auto y = [&](float py) { return 1.0f - (py - 0.5f) / h * 2.0f; };
+  struct Vertex {
+    float x, y, z, w, u, v;
+  };
+  const Vertex quad[4] = {
+      {x(px0), y(py0), 0, 1, px0 / w, py0 / h},
+      {x(px1), y(py0), 0, 1, px1 / w, py0 / h},
+      {x(px0), y(py1), 0, 1, px0 / w, py1 / h},
+      {x(px1), y(py1), 0, 1, px1 / w, py1 / h},
+  };
+  // DrawPrimitiveUP unbinds stream 0; UE3 caches it, so put it back.
+  IDirect3DVertexBuffer9* stream = nullptr;
+  UINT offset = 0, stride = 0;
+  VFn<GetStreamSource_t>(device, kGetStreamSource)(device, 0, &stream, &offset, &stride);
+  vrcore::scene_tap::DrawPrimitiveUPDirect(device, D3DPT_TRIANGLESTRIP, 2, quad, sizeof(Vertex));
+  VFn<SetStreamSource_t>(device, kSetStreamSource)(device, 0, stream, offset, stride);
+  if (stream) stream->Release();
+  if (g_composites++ == 0) {
+    VR_LOG_INFO("sensen stereo: right-view composite quad over %d,%d %dx%d (composite draw kind %d, viewport %lux%lu)",
+                r.x, r.y, r.w, r.h, static_cast<int>(call.kind), vp.Width, vp.Height);
+  }
+  return true;
+}
+
+bool OnDraw(IDirect3DDevice9* device, const DrawCall& call) {
+  if (!g_stereo) return false;
   const int transform = device_state::VertexShaderConstant("Transform");
   if (transform >= 0) {
-    if (!SameRect(vp, t_views[0])) {
-      if (!g_loggedMismatch) {
-        g_loggedMismatch = true;
-        VR_LOG_INFO("sensen stereo: Scaleform draw with viewport %lu,%lu %lux%lu (left view %d,%d %dx%d); not "
-                    "duplicated",
-                    vp.X, vp.Y, vp.Width, vp.Height, t_views[0].x, t_views[0].y, t_views[0].w, t_views[0].h);
+    const D3DVIEWPORT9& vp = device_state::CurrentViewport();
+    if (!SameRect(vp, g_views[0])) {
+      if (!g_loggedViewportMismatch) {
+        g_loggedViewportMismatch = true;
+        VR_LOG_INFO("sensen stereo: Scaleform draw with viewport %lu,%lu %lux%lu (left view %d,%d %dx%d) left alone",
+                    vp.X, vp.Y, vp.Width, vp.Height, g_views[0].x, g_views[0].y, g_views[0].w, g_views[0].h);
       }
-      return;
+      return false;
     }
-    if (TargetIsBackbuffer(device)) return;  // 2D UI, handled by the UI panel
-    DuplicateHint(device, call, transform);
-    return;
+    if (TargetIsBackbuffer(device)) return false;  // 2D UI, handled by the UI panel
+    return DrawHintPerEye(device, call, transform);
   }
-  if (!t_compositeDone && device_state::PixelShaderConstant("DNESensenParam1") >= 0 &&
-      (call.kind == vrcore::scene_tap::DrawCall::Kind::PrimitiveUP ||
-       call.kind == vrcore::scene_tap::DrawCall::Kind::IndexedPrimitiveUP)) {
-    t_compositeDone = true;
-    AddRightComposite(device, call);
+  if (!g_compositeDone && device_state::PixelShaderConstant("DNESensenParam1") >= 0) {
+    g_compositeDone = true;
+    return CompositeWithRightView(device, call);
   }
+  return false;
 }
 
 void ReadView(uintptr_t view, ViewData& out) {
@@ -278,6 +289,17 @@ void ReadView(uintptr_t view, ViewData& out) {
     vrcore::mem::Read(view + kViewViewMatrix + i * 4, out.view[i]);
     vrcore::mem::Read(view + kViewProjectionMatrix + i * 4, out.proj[i]);
   }
+}
+
+bool FindGameCamera(const float* leftView, GameCamera& out) {
+  std::lock_guard<std::mutex> lock(g_camerasMutex);
+  for (const GameCamera& c : g_cameras) {
+    if (c.valid && std::memcmp(c.key, leftView, sizeof(c.key)) == 0) {
+      out = c;
+      return true;
+    }
+  }
+  return false;
 }
 
 }  // namespace
@@ -296,6 +318,17 @@ void Install() {
   VR_LOG_INFO("sensen stereo: on");
 }
 
+void PushGameCamera(const float leftEyeView[16], const float gameView[16], const float gameProj[16]) {
+  if (!g_installed) return;
+  std::lock_guard<std::mutex> lock(g_camerasMutex);
+  GameCamera& c = g_cameras[g_nextCamera];
+  g_nextCamera = (g_nextCamera + 1) % kCameraSlots;
+  std::memcpy(c.key, leftEyeView, sizeof(c.key));
+  std::memcpy(c.view, gameView, sizeof(c.view));
+  std::memcpy(c.proj, gameProj, sizeof(c.proj));
+  c.valid = true;
+}
+
 void OnRendererViews(void* renderer) {
   if (!g_installed) return;
   const auto base = reinterpret_cast<uintptr_t>(renderer);
@@ -304,17 +337,30 @@ void OnRendererViews(void* renderer) {
   vrcore::mem::Read(base + kRendererViewsNum, count);
   vrcore::mem::Read(base + kRendererViewsData, data);
   if (count != 2 || !data) {
-    t_stereo = false;
+    g_stereo = false;
     return;
   }
-  ReadView(data, t_views[0]);
-  ReadView(data + kViewInfoStride, t_views[1]);
-  t_stereo = ComputeCorrection();
+  ReadView(data, g_views[0]);
+  ReadView(data + kViewInfoStride, g_views[1]);
+  GameCamera camera;
+  if (!FindGameCamera(g_views[0].view, camera)) {
+    if (!g_loggedNoCamera) {
+      g_loggedNoCamera = true;
+      VR_LOG_WARN("sensen stereo: no game camera recorded for this frame's views; hints not redrawn");
+    }
+    g_stereo = false;
+    return;
+  }
+  g_stereo = Correction(camera.view, camera.proj, g_views[0].view, g_views[0].proj, g_correction[0]) &&
+             Correction(camera.view, camera.proj, g_views[1].view, g_views[1].proj, g_correction[1]);
+  if (g_stereo && g_frames++ == 0) {
+    VR_LOG_INFO("sensen stereo: first stereo frame matched to its game camera");
+  }
 }
 
 void EndFrame() {
-  t_stereo = false;
-  t_compositeDone = false;
+  g_stereo = false;
+  g_compositeDone = false;
 }
 
 }  // namespace rm::sensen_stereo

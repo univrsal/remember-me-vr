@@ -7,6 +7,7 @@
 #include <cstring>
 
 #include "engine.h"
+#include "sensen_stereo.h"
 #include "vrcore/hook.h"
 #include "vrcore/log.h"
 #include "vrcore/memory.h"
@@ -234,9 +235,22 @@ void* __fastcall HookCalcSceneView(void* self, void* /*edx*/, void* family, FVec
         right.fov = g.symmetricProjection ? Symmetric(g.testFov[1]) : g.testFov[1];
       }
     }
+    // The game camera's own matrices (mono: game FOV, full viewport), which
+    // the Sensen hints are built with; sensen_stereo re-projects them per eye.
+    alignas(16) float gameProj[16], gameView[16];
+    FVector gameLoc{};
+    FRotator gameRot{};
+    g_origCalcSceneView(self, family, &gameLoc, &gameRot, viewport, drawer, gameProj, gameView);
     view = CallEye(self, origin.x, half, viewState, left, family, loc, rot, viewport, drawer);
     g.lastLeft = left;
     g.haveLastLeft = true;
+    if (view) {
+      float leftView[16];
+      for (int i = 0; i < 16; ++i) {
+        vrcore::mem::Read(reinterpret_cast<uintptr_t>(view) + kViewViewMatrix + i * 4, leftView[i]);
+      }
+      sensen_stereo::PushGameCamera(leftView, gameView, gameProj);
+    }
     rightView = CallEye(self, origin.x + half, half, RightEyeState(viewState), right, family, loc, rot, viewport,
                         drawer);
     // Everything after us (HUD, audio listener, ...) sees the normal player again.
