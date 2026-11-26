@@ -16,9 +16,11 @@ namespace rm::draw_fixes {
 // batched-element tile) use UVs relative to the view (u = pixel / view width)
 // while sampling the whole scene buffer. In mono the view is the buffer; for a
 // stereo view they read the buffer from x = 0, stretched. A client-memory quad
-// whose UVs equal its position within the viewport, drawn into part of the
-// render target while sampling a texture of the render target's size, is
-// redrawn with UVs mapped into the buffer.
+// drawn with exactly the right view's viewport in a stereo frame, sampling a
+// texture of the render target's size, whose UVs equal its position within the
+// viewport, is redrawn with UVs mapped into the buffer. (Not the left view:
+// it starts at x = 0, and corner viewports of pooled targets, e.g. downsample
+// chains, legitimately use viewport-relative UVs.)
 void Configure(const vrcore::Config& config);
 
 // Registers the observer (needs device_state and scene_tap installed).

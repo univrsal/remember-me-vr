@@ -108,6 +108,7 @@ class RememberMe final : public vrcore::Game {
       sbsKeyDown_ = down;
     }
     rm::sensen_stereo::EndFrame();
+    rm::renderer_hooks::EndFrame();
     if (vrEnabled_) {
       IDirect3DTexture9* scene = vrcore::scene_tap::Take();
       IDirect3DTexture9* ui = vrcore::scene_tap::TakeUi();

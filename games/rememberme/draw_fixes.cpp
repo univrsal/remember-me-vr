@@ -6,6 +6,7 @@
 #include <vector>
 
 #include "device_state_hooks.h"
+#include "renderer_hooks.h"
 #include "sensen_stereo.h"
 #include "vrcore/log.h"
 
@@ -52,10 +53,18 @@ UINT VertexCount(const DrawCall& call) {
 bool FixViewportRelativeUvs(IDirect3DDevice9* device, const DrawCall& call) {
   if (call.kind != DrawCall::Kind::PrimitiveUP && call.kind != DrawCall::Kind::IndexedPrimitiveUP) return false;
   if (!call.vertices || call.stride < 24) return false;
+  // Only the right view of a stereo frame: corner viewports of pooled render
+  // targets (downsample/bloom/eye-adaptation chains) legitimately use
+  // viewport-relative UVs, and the left view starts at x = 0 anyway.
+  renderer_hooks::ViewRect left{}, right{};
+  if (!renderer_hooks::StereoViewRects(left, right)) return false;
   const D3DVIEWPORT9& vp = device_state::CurrentViewport();
-  if (vp.Width == 0 || vp.Height == 0) return false;
+  if (static_cast<int>(vp.X) != right.x || static_cast<int>(vp.Y) != right.y ||
+      static_cast<int>(vp.Width) != right.w || static_cast<int>(vp.Height) != right.h || right.x <= 0) {
+    return false;
+  }
   UINT rtW = 0, rtH = 0, texW = 0, texH = 0;
-  if (!RenderTargetSize(device, rtW, rtH) || !(vp.X > 0 || vp.Width < rtW)) return false;
+  if (!RenderTargetSize(device, rtW, rtH)) return false;
   if (!device_state::Stage0TextureSize(texW, texH) || texW != rtW || texH != rtH) return false;
   const UINT n = VertexCount(call);
   if (n < 3 || n > 64) return false;

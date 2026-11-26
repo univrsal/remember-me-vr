@@ -18,7 +18,9 @@ DownsampleSceneDepthFn g_origDownsample = nullptr;
 
 int g_logCalls = 0;               // from the config; 0 = off
 std::atomic<int> g_remaining{0};  // stereo calls still to log
-uint64_t g_logged = 0;            // calls logged so far (numbering in the log)
+uint64_t g_logged = 0;
+bool g_stereoFrame = false;  // render thread
+ViewRect g_rects[2]{};            // calls logged so far (numbering in the log)
 
 template <typename T>
 T At(uintptr_t base, uint32_t offset) {
@@ -44,6 +46,15 @@ void __fastcall HookDownsample(void* renderer, void* /*edx*/) {
   sensen_stereo::OnRendererViews(renderer);
   const auto base = reinterpret_cast<uintptr_t>(renderer);
   const int32_t views = At<int32_t>(base, kRendererViewsNum);
+  g_stereoFrame = views == 2;
+  if (g_stereoFrame) {
+    const uintptr_t first = At<uintptr_t>(base, kRendererViewsData);
+    for (int i = 0; i < 2; ++i) {
+      const uintptr_t view = first + static_cast<uintptr_t>(i) * kViewInfoStride;
+      g_rects[i] = {At<int32_t>(view, kViewRenderTargetX), At<int32_t>(view, kViewRenderTargetX + 4),
+                    At<int32_t>(view, kViewRenderTargetX + 8), At<int32_t>(view, kViewRenderTargetX + 12)};
+    }
+  }
   const bool log = views >= 2 && g_remaining.load(std::memory_order_relaxed) > 0;
   if (!log) {
     g_origDownsample(renderer);
@@ -70,7 +81,7 @@ void Configure(const vrcore::Config& config) {
 bool DiagnosticEnabled() { return g_logCalls > 0; }
 
 void Install() {
-  if (g_origDownsample || (g_logCalls <= 0 && !sensen_stereo::Enabled())) return;
+  if (g_origDownsample) return;
   auto* fn = vrcore::Exe().FromPreferredVA<uint8_t>(kDownsampleSceneDepth);
   if (!vrcore::mem::Matches(reinterpret_cast<uintptr_t>(fn), kDownsampleSceneDepthPrologueA,
                             sizeof(kDownsampleSceneDepthPrologueA)) ||
@@ -88,5 +99,14 @@ void Install() {
 }
 
 void Rearm() { g_remaining = g_logCalls; }
+
+bool StereoViewRects(ViewRect& left, ViewRect& right) {
+  if (!g_stereoFrame) return false;
+  left = g_rects[0];
+  right = g_rects[1];
+  return true;
+}
+
+void EndFrame() { g_stereoFrame = false; }
 
 }  // namespace rm::renderer_hooks

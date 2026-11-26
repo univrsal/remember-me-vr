@@ -21,4 +21,13 @@ void Install();
 
 void Rearm();
 
+// Render thread: this frame's view rects in the scene buffer (X, Y, SizeX,
+// SizeY), set at DownsampleSceneDepth when the renderer has two views (a
+// stereo frame). False otherwise, and after EndFrame().
+struct ViewRect {
+  int x, y, w, h;
+};
+bool StereoViewRects(ViewRect& left, ViewRect& right);
+void EndFrame();
+
 }  // namespace rm::renderer_hooks
