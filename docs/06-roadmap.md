@@ -74,6 +74,10 @@ Each milestone reduces the risk of the next one. **Milestone 3 is the go/no-go g
 - [ ] Comfort: no roll or shakes; world scale; recentre; INI config
 - [ ] 2D UI on its own panel (built, untested): in stereo frames, every backbuffer draw after the scene copy that doesn't sample the scene image is UI laid out in the left view's rect. It's redirected into a transparent texture of that size (premultiplied alpha via separate alpha blend, restored per draw) and submitted as a quad layer over the stereo projection layer. Mono frames are untouched. Open: the monitor mirror shows no UI in stereo frames
 - [ ] Sensen AR hints rendered per eye (currently left eye only, see 08)
+- [ ] UI panel test (2026-11-26): works for the most part. Open issues:
+  - Loading screens render the level being streamed in; the white tips panel only covers it on a flat screen. Detect loading and cover or hide the scene.
+  - Right-eye artifacts: light shaft cut by horizontal bands; a blue/shadow wedge on Nilin; puddle reflections (see 08).
+  - Character shadow shifted horizontally in opposite directions per eye (left eye left, right eye right). Fits a pass assuming a symmetric projection (our frusta are mirrored-asymmetric). `FSceneView` inverts the projection with a full `D3DXMatrixInverse`, so it's not the view's inverse. Diagnostics added: `[VR] SymmetricProjection` (also a workaround if it fixes it), and `[Stereo] TestFov` to render the flat F10 test with headset-like FOVs for RenderDoc captures (RenderDoc crashes with the OpenXR interop active).
 
 ## M5 — Final touches (requested)
 

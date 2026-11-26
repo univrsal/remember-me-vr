@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <atomic>
 #include <cmath>
+#include <cstdio>
 #include <cstring>
 
 #include "engine.h"
@@ -21,7 +22,8 @@ using vrcore::ue3::Rot;
 // Per-eye overrides, active only while our own CalcSceneView calls run (game thread).
 struct EyeOverride {
   bool active = false;
-  bool vr = false;           // true: absolute eye pose + projection from OpenXR
+  bool vr = false;           // true: absolute eye pose from OpenXR
+  bool overrideFov = false;  // true: projection from `fov`
   float testOffset = 0.0f;   // side-by-side test: shift along the view's right axis (uu)
   XrPosef pose{};
   XrFovf fov{};
@@ -34,6 +36,10 @@ struct State {
   bool vrStereo = true;
   float unitsPerMeter = 50.0f;
   vrcore::ue3::BaseOrientation base = vrcore::ue3::BaseOrientation::YawOnly;
+
+  bool symmetricProjection = false;
+  bool testFovOverride = false;
+  XrFovf testFov[2]{};
 
   std::atomic<bool> sideBySide{false};
   float testEyeSeparation = 6.4f;
@@ -57,6 +63,14 @@ PerspectiveMatrixFn g_origPerspectiveMatrix = nullptr;
 PovLookAtFn g_origPovLookAt = nullptr;
 void* g_povLookAtReturn = nullptr;
 AllocateViewStateFn g_allocateViewState = nullptr;
+
+// Smallest symmetric frustum containing `fov` (diagnostic/workaround for passes
+// that assume a centred projection).
+XrFovf Symmetric(const XrFovf& fov) {
+  const float h = std::max(-fov.angleLeft, fov.angleRight);
+  const float v = std::max(fov.angleUp, -fov.angleDown);
+  return {-h, h, v, -v};
+}
 
 template <typename T>
 T& Field(void* object, uint32_t offset) {
@@ -92,7 +106,7 @@ void __fastcall HookGetPlayerViewPoint(void* controller, void* /*edx*/, FVector*
 float* __fastcall HookPerspectiveMatrix(float* out, void* /*edx*/, float halfFovX, float halfFovY, float multFovX,
                                         float multFovY, float minZ, float maxZ) {
   float* result = g_origPerspectiveMatrix(out, halfFovX, halfFovY, multFovX, multFovY, minZ, maxZ);
-  if (g.eye.active && g.eye.vr && result) vrcore::ue3::ApplyAsymmetricFov(result, g.eye.fov);
+  if (g.eye.active && g.eye.overrideFov && result) vrcore::ue3::ApplyAsymmetricFov(result, g.eye.fov);
   return result;
 }
 
@@ -173,7 +187,13 @@ void* __fastcall HookCalcSceneView(void* self, void* /*edx*/, void* family, FVec
     const float half = size.x * 0.5f;
     EyeOverride left, right;
     if (vr) {
+      if (g.symmetricProjection) {
+        // Submitted with the same FOV, so the image stays geometrically correct.
+        frame.fov[0] = Symmetric(frame.fov[0]);
+        frame.fov[1] = Symmetric(frame.fov[1]);
+      }
       left.vr = right.vr = true;
+      left.overrideFov = right.overrideFov = true;
       left.pose = frame.pose[0];
       left.fov = frame.fov[0];
       right.pose = frame.pose[1];
@@ -181,6 +201,11 @@ void* __fastcall HookCalcSceneView(void* self, void* /*edx*/, void* family, FVec
     } else {
       left.testOffset = -0.5f * g.testEyeSeparation;
       right.testOffset = 0.5f * g.testEyeSeparation;
+      if (g.testFovOverride) {  // flat test rendered like the headset (for captures)
+        left.overrideFov = right.overrideFov = true;
+        left.fov = g.symmetricProjection ? Symmetric(g.testFov[0]) : g.testFov[0];
+        right.fov = g.symmetricProjection ? Symmetric(g.testFov[1]) : g.testFov[1];
+      }
     }
     view = CallEye(self, origin.x, half, viewState, left, family, loc, rot, viewport, drawer);
     rightView = CallEye(self, origin.x + half, half, RightEyeState(viewState), right, family, loc, rot, viewport,
@@ -209,9 +234,15 @@ void* __fastcall HookCalcSceneView(void* self, void* /*edx*/, void* family, FVec
         (vr || sbs) ? (rightView ? " [right view ok]" : " [RIGHT VIEW NULL]") : "");
     if (sbs) g.loggedSbs = true;
     if (firstStereo) {
+      constexpr float kDeg = 57.29578f;
       VR_LOG_INFO("first VR stereo frame: eye L pos (%.3f, %.3f, %.3f) m, R pos (%.3f, %.3f, %.3f) m, %.0f uu/m",
                   frame.pose[0].position.x, frame.pose[0].position.y, frame.pose[0].position.z,
                   frame.pose[1].position.x, frame.pose[1].position.y, frame.pose[1].position.z, g.unitsPerMeter);
+      VR_LOG_INFO("eye FOV (left,right,up,down deg): L %.1f,%.1f,%.1f,%.1f  R %.1f,%.1f,%.1f,%.1f%s",
+                  frame.fov[0].angleLeft * kDeg, frame.fov[0].angleRight * kDeg, frame.fov[0].angleUp * kDeg,
+                  frame.fov[0].angleDown * kDeg, frame.fov[1].angleLeft * kDeg, frame.fov[1].angleRight * kDeg,
+                  frame.fov[1].angleUp * kDeg, frame.fov[1].angleDown * kDeg,
+                  g.symmetricProjection ? " (symmetric projection)" : "");
     }
   }
   return view;
@@ -231,6 +262,17 @@ void SceneViewHooks::Configure(const vrcore::Config& config, vrcore::Compositor*
   g.unitsPerMeter = config.GetFloat("VR", "WorldScale", g.unitsPerMeter);
   g.base = config.GetString("VR", "CameraOrientation", "yaw") == "full" ? vrcore::ue3::BaseOrientation::Full
                                                                        : vrcore::ue3::BaseOrientation::YawOnly;
+  g.symmetricProjection = config.GetBool("VR", "SymmetricProjection", false);
+  // Flat test FOV: "game" (the game's own projection) or four angles in degrees
+  // for the left eye "left,right,up,down"; the right eye is mirrored.
+  const std::string testFov = config.GetString("Stereo", "TestFov", "game");
+  float l, r, u, d;
+  if (std::sscanf(testFov.c_str(), "%f,%f,%f,%f", &l, &r, &u, &d) == 4) {
+    constexpr float kRad = 0.01745329f;
+    g.testFov[0] = {l * kRad, r * kRad, u * kRad, d * kRad};
+    g.testFov[1] = {-r * kRad, -l * kRad, u * kRad, d * kRad};
+    g.testFovOverride = true;
+  }
   g.sideBySide = config.GetBool("Stereo", "TestSideBySide", false);
   g.testEyeSeparation = config.GetFloat("Stereo", "EyeSeparation", g.testEyeSeparation);
   const std::string rightState = config.GetString("Stereo", "RightEyeViewState", "own");
@@ -273,11 +315,12 @@ bool SceneViewHooks::Install() {
                             reinterpret_cast<void**>(&g_origPerspectiveMatrix)) &&
       vrcore::hook::Install("POV look-at", povLookAt, reinterpret_cast<void*>(&HookPovLookAt),
                             reinterpret_cast<void**>(&g_origPovLookAt));
-  VR_LOG_INFO("scene view hooks %s; VR stereo %s (world scale %.0f uu/m, camera orientation %s); side-by-side test "
-              "%s (toggle key 0x%02x); right view state %s",
+  VR_LOG_INFO("scene view hooks %s; VR stereo %s (world scale %.0f uu/m, camera orientation %s%s); side-by-side test "
+              "%s (toggle key 0x%02x, %s FOV); right view state %s",
               ok ? "installed" : "FAILED", g.vrStereo ? "on" : "off", g.unitsPerMeter,
-              g.base == vrcore::ue3::BaseOrientation::Full ? "full" : "yaw only", g.sideBySide ? "on" : "off",
-              toggleKey_,
+              g.base == vrcore::ue3::BaseOrientation::Full ? "full" : "yaw only",
+              g.symmetricProjection ? ", symmetric projection" : "", g.sideBySide ? "on" : "off", toggleKey_,
+              g.testFovOverride ? "headset-like" : "game",
               g.rightViewState == RightEyeViewState::Own      ? "own"
               : g.rightViewState == RightEyeViewState::Shared ? "shared"
                                                               : "none");
