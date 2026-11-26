@@ -31,6 +31,15 @@ using GetPlayerViewPointFn = void(__attribute__((thiscall)) *)(void* controller,
 constexpr uint32_t kGetPlayerViewPoint = 0x006A49F0;
 constexpr uint8_t kGetPlayerViewPointPrologue[] = {0x83, 0xEC, 0x18, 0x53, 0x55, 0x56, 0x8B, 0x74, 0x24, 0x28};
 
+// AllocateViewState(): `new FSceneViewState` (0x380 bytes, ctor 0x00A1FEE0), as
+// called by the ULocalPlayer constructor (0x008698F0) for LocalPlayer->ViewState.
+using AllocateViewStateFn = void* (*)();
+constexpr uint32_t kAllocateViewState = 0x00A22B90;
+// Bytes 3..6 are a relocatable SEH handler address; check around them.
+constexpr uint8_t kAllocateViewStatePrologueA[] = {0x6A, 0xFF, 0x68};
+constexpr uint32_t kAllocateViewStatePrologueBOffset = 7;
+constexpr uint8_t kAllocateViewStatePrologueB[] = {0x64, 0xA1, 0x00, 0x00, 0x00, 0x00, 0x50, 0x51};
+
 // ULocalPlayer fields.
 constexpr uint32_t kLocalPlayerActor = 0x40;      // PlayerController*
 constexpr uint32_t kLocalPlayerOrigin = 0x6C;     // FVector2D, viewport fraction

@@ -12,12 +12,13 @@
 namespace rm {
 namespace {
 
-enum class RightEyeViewState { None, Shared };
+enum class RightEyeViewState { Own, Shared, None };
 
 struct State {
   std::atomic<bool> sideBySide{false};
   float eyeSeparation = 6.4f;  // Unreal units between the eyes (test value)
-  RightEyeViewState rightViewState = RightEyeViewState::None;
+  RightEyeViewState rightViewState = RightEyeViewState::Own;
+  void* ownRightViewState = nullptr;  // allocated once via AllocateViewState, never freed
   int logFirstCalls = 8;
   int logEvery = 600;
 
@@ -32,6 +33,7 @@ struct State {
 State g;
 CalcSceneViewFn g_origCalcSceneView = nullptr;
 GetPlayerViewPointFn g_origGetPlayerViewPoint = nullptr;
+AllocateViewStateFn g_allocateViewState = nullptr;
 
 template <typename T>
 T& Field(void* object, uint32_t offset) {
@@ -81,7 +83,17 @@ void* __fastcall HookCalcSceneView(void* self, void* /*edx*/, void* family, FVec
     view = g_origCalcSceneView(self, family, loc, rot, viewport, drawer, outProjection, outView);
   } else {
     const float half = size.x * 0.5f;
-    void* rightState = g.rightViewState == RightEyeViewState::Shared ? viewState : nullptr;
+    void* rightState = nullptr;
+    if (g.rightViewState == RightEyeViewState::Shared) {
+      rightState = viewState;
+    } else if (g.rightViewState == RightEyeViewState::Own) {
+      // Same call the LocalPlayer constructor uses for its own ViewState (game thread).
+      if (!g.ownRightViewState) {
+        g.ownRightViewState = g_allocateViewState();
+        VR_LOG_INFO("allocated right-eye FSceneViewState %p", g.ownRightViewState);
+      }
+      rightState = g.ownRightViewState;
+    }
     view = CallEye(self, origin.x, half, -0.5f * g.eyeSeparation, viewState, family, loc, rot, viewport, drawer);
     rightView = CallEye(self, origin.x + half, half, 0.5f * g.eyeSeparation, rightState, family, loc, rot, viewport,
                         drawer);
@@ -111,8 +123,10 @@ void* __fastcall HookCalcSceneView(void* self, void* /*edx*/, void* family, FVec
 void SceneViewHooks::Configure(const vrcore::Config& config) {
   g.sideBySide = config.GetBool("Stereo", "TestSideBySide", false);
   g.eyeSeparation = config.GetFloat("Stereo", "EyeSeparation", g.eyeSeparation);
-  const std::string rightState = config.GetString("Stereo", "RightEyeViewState", "none");
-  g.rightViewState = rightState == "shared" ? RightEyeViewState::Shared : RightEyeViewState::None;
+  const std::string rightState = config.GetString("Stereo", "RightEyeViewState", "own");
+  g.rightViewState = rightState == "shared" ? RightEyeViewState::Shared
+                     : rightState == "none" ? RightEyeViewState::None
+                                            : RightEyeViewState::Own;
   g.logFirstCalls = config.GetInt("Stereo", "LogFirstCalls", g.logFirstCalls);
   g.logEvery = config.GetInt("Stereo", "LogEvery", g.logEvery);
   toggleKey_ = config.GetInt("Stereo", "ToggleKey", 0x79);  // F10
@@ -122,6 +136,15 @@ bool SceneViewHooks::Install() {
   const auto& exe = vrcore::Exe();
   void* calcSceneView = exe.FromPreferredVA(kCalcSceneView);
   void* getPlayerViewPoint = exe.FromPreferredVA(kGetPlayerViewPoint);
+  const auto allocateViewState = exe.FromPreferredVA<uint8_t>(kAllocateViewState);
+  if (!vrcore::mem::Matches(reinterpret_cast<uintptr_t>(allocateViewState), kAllocateViewStatePrologueA,
+                            sizeof(kAllocateViewStatePrologueA)) ||
+      !vrcore::mem::Matches(reinterpret_cast<uintptr_t>(allocateViewState + kAllocateViewStatePrologueBOffset),
+                            kAllocateViewStatePrologueB, sizeof(kAllocateViewStatePrologueB))) {
+    VR_LOG_ERROR("scene view hooks: AllocateViewState prologue doesn't match this build; not hooking");
+    return false;
+  }
+  g_allocateViewState = reinterpret_cast<AllocateViewStateFn>(allocateViewState);
   if (!vrcore::mem::Matches(reinterpret_cast<uintptr_t>(calcSceneView), kCalcSceneViewPrologue,
                             sizeof(kCalcSceneViewPrologue)) ||
       !vrcore::mem::Matches(reinterpret_cast<uintptr_t>(getPlayerViewPoint), kGetPlayerViewPointPrologue,
@@ -137,7 +160,9 @@ bool SceneViewHooks::Install() {
                             reinterpret_cast<void**>(&g_origGetPlayerViewPoint));
   VR_LOG_INFO("scene view hooks %s; side-by-side test %s (toggle key 0x%02x), eye separation %.1f uu, right view state %s",
               ok ? "installed" : "FAILED", g.sideBySide ? "on" : "off", toggleKey_, g.eyeSeparation,
-              g.rightViewState == RightEyeViewState::Shared ? "shared" : "none");
+              g.rightViewState == RightEyeViewState::Own      ? "own"
+              : g.rightViewState == RightEyeViewState::Shared ? "shared"
+                                                              : "none");
   return ok;
 }
 

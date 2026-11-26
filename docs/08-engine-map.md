@@ -65,6 +65,9 @@ The engine's `GamePlayers` array is at `GEngine + 0x4EC` (`GEngine` = `*(0x01643
 | `FPerspectiveMatrix(HalfFOVX, HalfFOVY, MultX, MultY, MinZ, MaxZ)` | `0x008092B0` | called with `MinZ == MaxZ` (infinite far plane); near plane global at `0x0154F6B4` |
 | `APlayerController::GetPlayerViewPoint` (probably) | `0x006A49F0` | fills view location/rotation in CalcSceneView; **to verify** |
 | `AExamplePlayerCamera::UpdateCameraBehaviour` (C++) | camera vtable `+0x494` | from the `exec` thunk |
+| `ULocalPlayer::ULocalPlayer` (constructor) | `0x008698F0` | sets the LocalPlayer vtables; `ViewState = AllocateViewState()` |
+| `AllocateViewState()` | `0x00A22B90` | `new FSceneViewState` (`0x380` bytes, ctor `0x00A1FEE0`); no args, returns the pointer |
+| `eventGetPlayerViewPoint` thunk | `0x006A49F0` | `__thiscall(controller, FVector*, FRotator*)`, `ret 8`; calls the script event via `ProcessEvent` (confirmed) |
 | 2,657 `Class::execFunction` natives | | labelled by `tools/ghidra/LabelUE3Natives.java` |
 
 ### `ULocalPlayer::CalcSceneView` (`0x008622B0`)
@@ -107,7 +110,8 @@ Both views land in the same family, so the renderer draws both eyes in one pass.
 
 ## Open questions
 
-- Exact argument order of `CalcSceneView` and `0x006A49F0`: confirm with a logging hook.
-- How to create the second `FSceneViewState`: find the allocator (UE3: `AllocateViewState()`, used where `ViewState` is first set).
+- ~~Argument order of `CalcSceneView`~~: confirmed in game by the logging hook (one view per normal frame; `views 0->2` with the side-by-side test).
+- ~~How to create the second `FSceneViewState`~~: `AllocateViewState()` at `0x00A22B90`.
+- **A null `FSceneView::State` crashes the renderer.** `FSceneView` has `Family +0x0` and `State +0x4`. DONTNOD's motion-blur setup (`0x00A38B60`, reading `State+0x238`) doesn't null-check it, unlike stock UE3 paths, so every view needs a real view state.
 - What the projection-override object at `0x01647800+0x1AC+0x88` is, and when it exists.
 - Whether any DNE render pass breaks with two views in a family.
