@@ -93,8 +93,11 @@ bool Input::Init(Context& xr) {
                   {stick_, "/user/hand/right/input/thumbstick"},
                   {trigger_, "/user/hand/left/input/trigger/value"},
                   {trigger_, "/user/hand/right/input/trigger/value"},
-                  {grip_, "/user/hand/left/input/squeeze/value"},
-                  {grip_, "/user/hand/right/input/squeeze/value"},
+                  // squeeze/value is finger curl (~1 just holding the
+                  // controller, i.e. LB/RB held all the time); force is
+                  // the actual squeeze.
+                  {grip_, "/user/hand/left/input/squeeze/force"},
+                  {grip_, "/user/hand/right/input/squeeze/force"},
                   {primary_, "/user/hand/left/input/a/click"},
                   {primary_, "/user/hand/right/input/a/click"},
                   {secondary_, "/user/hand/left/input/b/click"},
@@ -208,9 +211,9 @@ void Input::Sync(Context& xr) {
     if (moved && now >= nextStickLogMs_) {
       nextStickLogMs_ = now + 500;
       std::memcpy(loggedStick_, s.stick, sizeof(loggedStick_));
-      VR_LOG_INFO("xr input: sticks L(%s) %.2f,%.2f  R(%s) %.2f,%.2f  triggers %.2f %.2f", s.stickActive[0] ? "on" : "off",
-                  s.stick[0][0], s.stick[0][1], s.stickActive[1] ? "on" : "off", s.stick[1][0], s.stick[1][1],
-                  s.trigger[0], s.trigger[1]);
+      VR_LOG_INFO("xr input: sticks L(%s) %.2f,%.2f  R(%s) %.2f,%.2f  triggers %.2f %.2f  grips %.2f %.2f",
+                  s.stickActive[0] ? "on" : "off", s.stick[0][0], s.stick[0][1], s.stickActive[1] ? "on" : "off",
+                  s.stick[1][0], s.stick[1][1], s.trigger[0], s.trigger[1], s.grip[0], s.grip[1]);
     }
     if (any != loggedActive_) {
       loggedActive_ = any;
