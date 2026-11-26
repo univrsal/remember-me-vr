@@ -62,7 +62,8 @@ bool Compositor::PopStereoFrame(StereoFrame& out) {
   return true;
 }
 
-void Compositor::OnPresent(IDirect3DDevice9* device, IDirect3DTexture9* sceneTexture) {
+void Compositor::OnPresent(IDirect3DDevice9* device, IDirect3DTexture9* sceneTexture,
+                           IDirect3DTexture9* uiTexture) {
   if (device != device_) {
     if (device_) {
       // The old device (and DXVK's VkDevice) may already be gone: abandon its
@@ -72,6 +73,7 @@ void Compositor::OnPresent(IDirect3DDevice9* device, IDirect3DTexture9* sceneTex
       xr_.Shutdown();
       stereoSwapchain_ = Swapchain{.name = "stereo"};
       screenSwapchain_ = Swapchain{.name = "screen"};
+      uiSwapchain_ = Swapchain{.name = "ui"};
       pool_ = VK_NULL_HANDLE;
       cmd_ = VK_NULL_HANDLE;
       fence_ = VK_NULL_HANDLE;
@@ -133,10 +135,11 @@ void Compositor::OnPresent(IDirect3DDevice9* device, IDirect3DTexture9* sceneTex
   const bool haveStereo = PopStereoFrame(stereo);
 
   XrCompositionLayerQuad quad{XR_TYPE_COMPOSITION_LAYER_QUAD};
+  XrCompositionLayerQuad uiQuad{XR_TYPE_COMPOSITION_LAYER_QUAD};
   XrCompositionLayerProjection projection{XR_TYPE_COMPOSITION_LAYER_PROJECTION};
   XrCompositionLayerProjectionView eyes[2] = {{XR_TYPE_COMPOSITION_LAYER_PROJECTION_VIEW},
                                               {XR_TYPE_COMPOSITION_LAYER_PROJECTION_VIEW}};
-  const XrCompositionLayerBaseHeader* layers[1] = {};
+  const XrCompositionLayerBaseHeader* layers[2] = {};
   uint32_t layerCount = 0;
 
   if (frame.shouldRender) {
@@ -189,6 +192,26 @@ void Compositor::OnPresent(IDirect3DDevice9* device, IDirect3DTexture9* sceneTex
           projection.views = eyes;
           layers[0] = reinterpret_cast<const XrCompositionLayerBaseHeader*>(&projection);
           layerCount = 1;
+
+          // UI over the scene: premultiplied alpha, world-locked like the screen.
+          D3DSURFACE_DESC ud{};
+          IDirect3DSurface9* uiSurface = nullptr;
+          if (uiTexture && SUCCEEDED(uiTexture->GetLevelDesc(0, &ud)) &&
+              SUCCEEDED(uiTexture->GetSurfaceLevel(0, &uiSurface)) && uiSurface &&
+              EnsureSwapchain(uiSwapchain_, ud.Width, ud.Height) &&
+              CopyToSwapchain(dxvk, uiSurface, true, uiSwapchain_, ud.Width, ud.Height)) {
+            uiQuad.layerFlags = XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT;
+            uiQuad.space = xr_.LocalSpace();
+            uiQuad.eyeVisibility = XR_EYE_VISIBILITY_BOTH;
+            uiQuad.subImage.swapchain = uiSwapchain_.handle;
+            uiQuad.subImage.imageRect = {{0, 0}, {static_cast<int32_t>(ud.Width), static_cast<int32_t>(ud.Height)}};
+            uiQuad.pose.orientation.w = 1.0f;
+            uiQuad.pose.position = {0.0f, settings_.uiHeight, -settings_.uiDistance};
+            uiQuad.size = {settings_.uiWidth,
+                           settings_.uiWidth * static_cast<float>(ud.Height) / static_cast<float>(ud.Width)};
+            layers[layerCount++] = reinterpret_cast<const XrCompositionLayerBaseHeader*>(&uiQuad);
+          }
+          if (uiSurface) uiSurface->Release();
         }
         if (sceneSurface) sceneSurface->Release();
       } else if (EnsureSwapchain(screenSwapchain_, bb.Width, bb.Height) &&
@@ -439,6 +462,7 @@ void Compositor::DestroySwapchain(Swapchain& sc) {
 void Compositor::DestroySwapchains() {
   DestroySwapchain(stereoSwapchain_);
   DestroySwapchain(screenSwapchain_);
+  DestroySwapchain(uiSwapchain_);
   sceneSourceLogged_ = -1;
 }
 

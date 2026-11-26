@@ -39,6 +39,9 @@ class Compositor {
     Mode mode = Mode::Stereo;
     float screenDistance = 2.5f;  // metres in front of the recentred head
     float screenWidth = 3.0f;     // metres; height follows the backbuffer aspect
+    float uiDistance = 1.6f;      // UI panel in stereo frames: metres in front of the recentred head
+    float uiWidth = 1.3f;         // metres; height follows the UI texture aspect
+    float uiHeight = 0.0f;        // vertical offset in metres (negative = lower)
     int recenterKey = 0x77;       // virtual-key code (default F8); 0 = none
     const char* appName = "vrcore";
   };
@@ -55,7 +58,10 @@ class Compositor {
   // before UI, at its internal resolution: stereo frames are taken from it
   // (resolution independent of the window) when its size/format fit,
   // otherwise from the backbuffer.
-  void OnPresent(IDirect3DDevice9* device, IDirect3DTexture9* sceneTexture = nullptr);
+  // `uiTexture` (optional, premultiplied alpha) is shown on a floating panel
+  // over the stereo scene.
+  void OnPresent(IDirect3DDevice9* device, IDirect3DTexture9* sceneTexture = nullptr,
+                 IDirect3DTexture9* uiTexture = nullptr);
   // Device reset/recreation: drops the swapchain (sizes may change).
   void OnDeviceChanged();
   // Tears down OpenXR + Vulkan objects. Only while the D3D9 device is alive;
@@ -103,6 +109,7 @@ class Compositor {
 
   Swapchain stereoSwapchain_{.name = "stereo"};
   Swapchain screenSwapchain_{.name = "screen"};
+  Swapchain uiSwapchain_{.name = "ui"};
   int sceneSourceLogged_ = -1;  // last logged stereo source (0 backbuffer, n = scene at n x)
 
   // Game thread -> presenting thread.

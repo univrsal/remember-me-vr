@@ -86,7 +86,7 @@ For VR on Linux, two more things are needed:
 
 Press F8 (configurable) to recenter the view.
 
-`RememberMeVR.ini` `[VR]` options: `Mode` (`stereo` or `screen`), `StereoSource` (`scene`: the game's internal scene image, so stereo resolution = window × `SuperSampleCount`; or `backbuffer`), `WorldScale` (Unreal units per metre), `CameraOrientation` (`yaw` keeps the horizon level; `full` follows the game camera), flat-panel size/distance, recenter key. In stereo mode the game window holds both eyes side by side; the log suggests the window size for 1:1 pixels (`ExampleAdriftGfxConfig.ini`, see docs/05).
+`RememberMeVR.ini` `[VR]` options: `Mode` (`stereo` or `screen`), `StereoSource` (`scene`: the game's internal scene image, so stereo resolution = window × `SuperSampleCount`; or `backbuffer`), `WorldScale` (Unreal units per metre), `CameraOrientation` (`yaw` keeps the horizon level; `full` follows the game camera), `UiPanel` with `UiDistance`/`UiWidth`/`UiHeight` (the game's UI on its own floating panel in stereo), flat-panel size/distance, recenter key. In stereo mode the game window holds both eyes side by side; the log suggests the window size for 1:1 pixels (`ExampleAdriftGfxConfig.ini`, see docs/05).
 
 The log is written to `Binaries/Win32/RememberMeVR.log`. Set `[Core] Enabled=0` in the INI to turn the mod into a plain pass-through proxy.
 

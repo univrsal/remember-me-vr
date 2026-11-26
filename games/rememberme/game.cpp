@@ -32,12 +32,17 @@ class RememberMe final : public vrcore::Game {
     vr.screenDistance = config.GetFloat("VR", "ScreenDistance", vr.screenDistance);
     vr.screenWidth = config.GetFloat("VR", "ScreenWidth", vr.screenWidth);
     vr.recenterKey = config.GetInt("VR", "RecenterKey", vr.recenterKey);
+    vr.uiDistance = config.GetFloat("VR", "UiDistance", vr.uiDistance);
+    vr.uiWidth = config.GetFloat("VR", "UiWidth", vr.uiWidth);
+    vr.uiHeight = config.GetFloat("VR", "UiHeight", vr.uiHeight);
     vr.appName = "Remember Me VR";
     compositor_.Configure(vr);
     // Stereo frames from the game's scene image (internal, e.g. supersampled,
     // resolution) instead of the window-sized backbuffer.
     const bool sceneSource = config.GetString("VR", "StereoSource", "scene") == "scene";
     vrcore::scene_tap::Enable(vrEnabled_ && sceneSource);
+    // Stereo frames: UI (laid out in the left view's rect) to its own panel.
+    vrcore::scene_tap::EnableUiRedirect(vrEnabled_ && sceneSource && config.GetBool("VR", "UiPanel", true));
     ue3Discover_ = config.GetBool("UE3", "Discover", true);
     ue3DumpOnStart_ = config.GetBool("UE3", "DumpObjectsOnStart", true);
     ue3DumpKey_ = config.GetInt("UE3", "DumpObjectsKey", 0x78);  // F9
@@ -84,8 +89,10 @@ class RememberMe final : public vrcore::Game {
     }
     if (vrEnabled_) {
       IDirect3DTexture9* scene = vrcore::scene_tap::Take();
-      compositor_.OnPresent(device, scene);
+      IDirect3DTexture9* ui = vrcore::scene_tap::TakeUi();
+      compositor_.OnPresent(device, scene, ui);
       if (scene) scene->Release();
+      if (ui) ui->Release();
     }
     ++frames_;
     if (presentLogInterval_ > 0 && frames_ % static_cast<uint64_t>(presentLogInterval_) == 0) {

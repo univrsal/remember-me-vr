@@ -50,6 +50,7 @@ HRESULT STDMETHODCALLTYPE HookPresent(IDirect3DDevice9* self, const RECT* src, c
                                       const RGNDATA* dirty) {
   if (t_inPresent) return g_origPresent(self, src, dst, wnd, dirty);
   t_inPresent = true;
+  scene_tap::detail::BeforePresent(self);
   NotifyPresent(self, "IDirect3DDevice9::Present");
   const HRESULT hr = g_origPresent(self, src, dst, wnd, dirty);
   scene_tap::detail::EndFrame();
@@ -63,6 +64,7 @@ HRESULT STDMETHODCALLTYPE HookSwapChainPresent(IDirect3DSwapChain9* self, const 
   t_inPresent = true;
   IDirect3DDevice9* device = nullptr;
   if (SUCCEEDED(self->GetDevice(&device)) && device) {
+    scene_tap::detail::BeforePresent(device);
     NotifyPresent(device, "IDirect3DSwapChain9::Present");
     device->Release();
   }
@@ -76,7 +78,9 @@ HRESULT STDMETHODCALLTYPE HookReset(IDirect3DDevice9* self, D3DPRESENT_PARAMETER
   VR_LOG_INFO("Reset: %ux%u windowed=%d", params ? params->BackBufferWidth : 0,
               params ? params->BackBufferHeight : 0, params ? params->Windowed : -1);
   GetGame().OnBeforeReset(self);
+  scene_tap::detail::BeforePresent(self);
   scene_tap::detail::EndFrame();
+  scene_tap::detail::ReleaseDeviceResources();  // D3DPOOL_DEFAULT must be gone before Reset
   const HRESULT hr = g_origReset(self, params);
   if (FAILED(hr)) VR_LOG_WARN("Reset failed: 0x%08lx", hr);
   if (params) GetGame().OnAfterReset(self, *params, hr);
