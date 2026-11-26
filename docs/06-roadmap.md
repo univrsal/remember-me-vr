@@ -39,16 +39,18 @@ Each milestone reduces the risk of the next one. **Milestone 3 is the go/no-go g
 
 ## M2 — Engine access
 
-- [ ] `GNames`/`GObjects` located; object/class/property dump
-- [ ] Live `LocalPlayer`, `GameViewportClient`, `PlayerController` and `Camera` objects, and their vtables, identified
+- [x] `GNames`/`GObjects` found by shape at runtime; object/class/property dumps (`vrcore::ue3`, F9 in game). See 08.
+- [x] Live `LocalPlayer`, `GameViewportClient`, `PlayerController`, `Camera` objects and their vtables identified
+- [x] Located in Ghidra: `UGameViewportClient::Draw` `0x0086D7F0`, `ULocalPlayer::CalcSceneView` `0x008622B0`, `ProcessEvent` `0x00458BA0`, `FPerspectiveMatrix` `0x008092B0`, `FSceneView` ctor `0x00A17F80`; `ViewState` at `LocalPlayer+0x8C`
+- [x] **Finding:** `CalcSceneView` adds its view to the family itself, so calling it twice per frame gives two views in one family (S2) through a single hook. See 08.
+- [ ] Logging hook on `CalcSceneView` to confirm argument order and call frequency
+- [ ] Find how UE3 allocates an `FSceneViewState` (for the second eye)
 - [ ] `ProcessEvent` hook
-- [ ] Re-enable the console: construct the console object (`ExampleGame.ExampleConsole`) and assign it to `GameViewportClient.ViewportConsole`, the usual UE3 console-unlocker approach. Independently, call the engine's console-command `Exec` path directly from the mod. The port itself issues `SETRES` through it, so that path is live in the shipping build. Some cheat/debug commands may be compiled out.
-- [ ] Locate in Ghidra: the viewport draw call site (`FViewport::Draw` / `UGameViewportClient::Draw`), `ULocalPlayer::CalcSceneView`, `ULocalPlayer::ViewState` offset, and the view-state allocator
-- [ ] Prove control: overwrite camera POV and projection for one frame (flat screen)
+- [ ] Prove control: change camera position and projection for one frame (flat screen)
 
 ## M3 — Synchronous stereo (go/no-go)
 
-- [ ] Draw the viewport twice per tick, with per-eye POV, asymmetric projection and view state (S1)
+- [ ] Two views per family via the `CalcSceneView` hook (S2), with per-eye viewport half, view state, eye offset and asymmetric projection. If DNE passes break with two views: draw the viewport twice per tick instead (S1)
 - [ ] Capture both eyes; suppress the first present; submit both eyes in one OpenXR projection layer with matching poses
 - [ ] Head tracking applied to the view only
 - [ ] Check the side effects of drawing twice (HUD script, counters, scene captures)

@@ -11,6 +11,7 @@ Evaluation done 2026-11-25. For building and running the mod itself, see the [ro
 | [05-toolchain.md](05-toolchain.md) | Building and debugging on Linux/Proton vs Windows |
 | [06-roadmap.md](06-roadmap.md) | Milestones, go/no-go gate, risks and open questions |
 | [07-frame-capture.md](07-frame-capture.md) | RenderDoc analysis of an in-game frame |
+| [08-engine-map.md](08-engine-map.md) | Engine addresses, object/property layouts, `CalcSceneView` and the stereo hook plan |
 
 ## Summary
 
