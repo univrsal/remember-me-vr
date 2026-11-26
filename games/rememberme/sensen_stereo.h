@@ -16,8 +16,9 @@ namespace rm::sensen_stereo {
 // In stereo frames every hint draw is drawn once per eye with that eye's
 // viewport and Transform x C_eye, where
 //   C_eye = inverse(TVP_game) x Translate(origin_game - origin_eye) x TVP_eye
-// (TVP = rotation-only view x projection), and one composite quad is added
-// over the right view (the composite discards pixels without hint content).
+// (TVP = rotation-only view x projection). The game's composite tiles (placed
+// where the game camera sees the hints) are replaced by one quad per view (the
+// composite discards pixels without hint content).
 void Configure(const vrcore::Config& config);
 bool Enabled();
 

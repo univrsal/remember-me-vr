@@ -57,7 +57,7 @@ int g_nextCamera = 0;
 bool g_stereo = false;  // this frame has two views and corrections
 ViewData g_views[2];
 float g_correction[2][16]{};  // C_eye, row-major
-bool g_compositeDone = false;
+bool g_compositeDone = false;  // this frame's composite quads drawn
 uint64_t g_hintDraws = 0, g_composites = 0, g_frames = 0;
 bool g_loggedViewportMismatch = false;
 bool g_loggedNoCamera = false;
@@ -217,42 +217,45 @@ bool DrawHintPerEye(IDirect3DDevice9* device, const DrawCall& call, int reg) {
   return true;
 }
 
-// The first composite draw of the frame: draw it, then one quad over the right
-// view. The composite's quads map the layer 1:1 onto the viewport (UV = pixel /
-// viewport size) with D3D9's half-pixel offset; vertices are float4 position +
-// float2 UV.
-bool CompositeWithRightView(IDirect3DDevice9* device, const DrawCall& call) {
+// The game composites tiles where *it* thinks the hints are (game camera), so
+// with the hints moved per eye its tiles can miss them. In stereo frames the
+// game's tile draws are replaced by one quad per view, drawn at the first tile
+// (later tiles are skipped). The composite discards pixels without hint
+// content, so covering a whole view is safe. The quads map the layer 1:1 onto
+// the viewport (UV = pixel / viewport size) with D3D9's half-pixel offset;
+// vertices are float4 position + float2 UV.
+bool CompositeBothViews(IDirect3DDevice9* device, const DrawCall& call) {
   using GetStreamSource_t = HRESULT(STDMETHODCALLTYPE*)(IDirect3DDevice9*, UINT, IDirect3DVertexBuffer9**, UINT*,
                                                          UINT*);
   using SetStreamSource_t = HRESULT(STDMETHODCALLTYPE*)(IDirect3DDevice9*, UINT, IDirect3DVertexBuffer9*, UINT, UINT);
-  call.Reissue(device);
   const D3DVIEWPORT9& vp = device_state::CurrentViewport();
-  if (vp.Width == 0 || vp.Height == 0) return true;
+  if (vp.Width == 0 || vp.Height == 0) return false;
   const float w = static_cast<float>(vp.Width), h = static_cast<float>(vp.Height);
-  const ViewData& r = g_views[1];
-  const float px0 = static_cast<float>(r.x) - vp.X, px1 = px0 + r.w;
-  const float py0 = static_cast<float>(r.y) - vp.Y, py1 = py0 + r.h;
-  const auto x = [&](float px) { return (px - 0.5f) / w * 2.0f - 1.0f; };
-  const auto y = [&](float py) { return 1.0f - (py - 0.5f) / h * 2.0f; };
   struct Vertex {
     float x, y, z, w, u, v;
   };
-  const Vertex quad[4] = {
-      {x(px0), y(py0), 0, 1, px0 / w, py0 / h},
-      {x(px1), y(py0), 0, 1, px1 / w, py0 / h},
-      {x(px0), y(py1), 0, 1, px0 / w, py1 / h},
-      {x(px1), y(py1), 0, 1, px1 / w, py1 / h},
-  };
+  const auto x = [&](float px) { return (px - 0.5f) / w * 2.0f - 1.0f; };
+  const auto y = [&](float py) { return 1.0f - (py - 0.5f) / h * 2.0f; };
   // DrawPrimitiveUP unbinds stream 0; UE3 caches it, so put it back.
   IDirect3DVertexBuffer9* stream = nullptr;
   UINT offset = 0, stride = 0;
   VFn<GetStreamSource_t>(device, kGetStreamSource)(device, 0, &stream, &offset, &stride);
-  vrcore::scene_tap::DrawPrimitiveUPDirect(device, D3DPT_TRIANGLESTRIP, 2, quad, sizeof(Vertex));
+  for (const ViewData& r : g_views) {
+    const float px0 = static_cast<float>(r.x) - vp.X, px1 = px0 + r.w;
+    const float py0 = static_cast<float>(r.y) - vp.Y, py1 = py0 + r.h;
+    const Vertex quad[4] = {
+        {x(px0), y(py0), 0, 1, px0 / w, py0 / h},
+        {x(px1), y(py0), 0, 1, px1 / w, py0 / h},
+        {x(px0), y(py1), 0, 1, px0 / w, py1 / h},
+        {x(px1), y(py1), 0, 1, px1 / w, py1 / h},
+    };
+    vrcore::scene_tap::DrawPrimitiveUPDirect(device, D3DPT_TRIANGLESTRIP, 2, quad, sizeof(Vertex));
+  }
   VFn<SetStreamSource_t>(device, kSetStreamSource)(device, 0, stream, offset, stride);
   if (stream) stream->Release();
   if (g_composites++ == 0) {
-    VR_LOG_INFO("sensen stereo: right-view composite quad over %d,%d %dx%d (composite draw kind %d, viewport %lux%lu)",
-                r.x, r.y, r.w, r.h, static_cast<int>(call.kind), vp.Width, vp.Height);
+    VR_LOG_INFO("sensen stereo: composite replaced by one quad per view (game's draw kind %d, viewport %lux%lu)",
+                static_cast<int>(call.kind), vp.Width, vp.Height);
   }
   return true;
 }
@@ -273,9 +276,10 @@ bool OnDraw(IDirect3DDevice9* device, const DrawCall& call) {
     if (TargetIsBackbuffer(device)) return false;  // 2D UI, handled by the UI panel
     return DrawHintPerEye(device, call, transform);
   }
-  if (!g_compositeDone && device_state::PixelShaderConstant("DNESensenParam1") >= 0) {
+  if (device_state::PixelShaderConstant("DNESensenParam1") >= 0) {
+    if (g_compositeDone) return true;  // the game's other tiles: already covered
     g_compositeDone = true;
-    return CompositeWithRightView(device, call);
+    return CompositeBothViews(device, call);
   }
   return false;
 }
