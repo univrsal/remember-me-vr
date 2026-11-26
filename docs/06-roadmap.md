@@ -32,7 +32,9 @@ Each milestone reduces the risk of the next one. **Milestone 3 is the go/no-go g
   - **SteamVR must be running before the game.** DXVK asks wineopenxr for the required Vulkan extensions when it creates its instance.
   - **No OpenXR teardown at process exit.** The D3D9/DXVK device is already gone by then, and destroying the session makes the runtime submit to a dead queue and crash.
   - **Copy stall.** The copy waits for the GPU per frame (`WaitForResource` + fence). Simple and correct; replace with semaphores/timeline later if it costs too much.
-- [ ] Verify in the real game: comfortable 30-minute session, recenter, Reset (resolution change)
+- [x] Works in the real game (2026-11-26): world-locked panel in the Index, 1880×2089 sRGB swapchain with bit-exact copy, no extension warnings with SteamVR started first.
+  - UE3 **restarts its render thread** (presents moved from thread 564 to 616 at ~17 s, around loading). OpenXR calls need only be externally synchronised, not on a fixed thread, so this is fine, but nothing may assume one render thread for the whole session.
+- [ ] Remaining exit checks: 30-minute session, F8 recenter, resolution change (Reset), frame pacing feel
 - **Exit criteria:** stable for 30+ minutes, no extension or device-lost errors. ~~Answers whether DXVK + wineopenxr interop works in a 32-bit process.~~ **Answered: yes**, given the i686 runtime manifest.
 
 ## M2 — Engine access
