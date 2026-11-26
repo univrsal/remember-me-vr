@@ -27,11 +27,13 @@ games/rememberme/         Remember Me module
 tests/smoke_host.cpp      stand-in game exe for testing a build under Wine
 tools/deploy.sh           install/uninstall into the game folder
 tools/smoke-test.sh       run the smoke host under Wine with the built mod
+tools/package.sh          zip a build for release (used by CI)
+.github/workflows/        CI: build + package on push/PR, release on v* tags
 cmake/                    mingw toolchain file, vrcore_add_mod() helper
 docs/                     evaluation, architecture, roadmap, capture analysis
 ```
 
-The following are gitignored and stay local: `re/` (the unpacked exe, Ghidra projects, capture conversions), `tools/steamless/`, `*.rdc` captures and `build/`.
+The following are gitignored and stay local: `re/` (the unpacked exe, Ghidra projects, capture conversions), `tools/steamless/`, `*.rdc` captures, `build/` and `dist/`.
 
 ## Building (Linux)
 
@@ -69,12 +71,30 @@ WINEDLLOVERRIDES="dinput8=n,b" %command%
 
 The log is written to `Binaries/Win32/RememberMeVR.log`. Set `[Core] Enabled=0` in the INI to turn the mod into a plain pass-through proxy.
 
+## Packaging and CI
+
+```sh
+tools/package.sh             # -> dist/RememberMeVR-<git describe>.zip
+```
+
+The zip mirrors the game folder (`Binaries/Win32/dinput8.dll`, `RememberMeVR.ini`), plus `INSTALL.txt` and `VERSION.txt` at the root, so users extract it straight into the game's install folder. The packaged DLL has its debug info stripped; the copy in `build/` keeps it.
+
+`.github/workflows/build.yml` runs on every push, pull request and manual trigger. It builds with Ubuntu's mingw-w64, packages, and uploads the zip as a workflow artifact.
+
+To publish a release, push a tag starting with `v`:
+
+```sh
+git tag v0.1.0 && git push origin v0.1.0
+```
+
+That creates a GitHub pre-release named after the tag, with the zip attached and auto-generated notes. To build more games in CI, add them to the workflow's `matrix.game` list.
+
 ## Adding another game
 
 1. Create `games/<name>/` with:
    - a `game.cpp` implementing `vrcore::Game` and defining `vrcore::GetGame()`;
    - a `CMakeLists.txt` calling `vrcore_add_mod(<Target> PROXY <dll> SOURCES game.cpp)`;
-   - a default `.ini`, `deploy.env` and `smoke.env`.
+   - a default `.ini`, `deploy.env`, `smoke.env`, `package.env` and `INSTALL.txt`.
 2. Pick a proxy DLL the game imports, and that isn't `d3d9.dll` (that would replace DXVK). If `core/proxy/<dll>/` doesn't exist yet, add one modelled on `core/proxy/dinput8/`.
 3. Configure with `-DVRMOD_GAME=<name>`.
 

@@ -2,6 +2,7 @@
 
 #include <cstdlib>
 #include <cstring>
+#include <iterator>
 
 #include <windows.h>
 

@@ -1,0 +1,27 @@
+Remember Me VR mod (work in progress)
+=====================================
+
+This build doesn't render in VR yet. It loads into the game and writes a log;
+it's meant for testing.
+
+Install
+-------
+Extract this archive into the game's install folder (the one that contains
+Binaries/, Engine/ and ExampleGame/). The files go to:
+
+  Binaries/Win32/dinput8.dll
+  Binaries/Win32/RememberMeVR.ini
+
+Linux (Proton): set the game's Steam launch options to
+
+  WINEDLLOVERRIDES="dinput8=n,b" %command%
+
+Windows: the mod needs DXVK's 32-bit d3d9.dll in Binaries/Win32 for VR output
+(https://github.com/doitsujin/dxvk/releases). Without it, it only logs.
+
+Log: Binaries/Win32/RememberMeVR.log
+Settings: Binaries/Win32/RememberMeVR.ini ([Core] Enabled=0 turns the mod off)
+
+Uninstall
+---------
+Delete Binaries/Win32/dinput8.dll, RememberMeVR.ini and RememberMeVR.log.
