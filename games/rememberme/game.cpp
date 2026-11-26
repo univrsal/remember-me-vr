@@ -4,6 +4,8 @@
 
 #include "vrcore/game.h"
 #include "vrcore/log.h"
+#include "vrcore/process.h"
+#include "vrcore/ue3.h"
 #include "vrcore/virtual_screen.h"
 
 namespace {
@@ -28,6 +30,9 @@ class RememberMe final : public vrcore::Game {
     screen.recenterKey = config.GetInt("VR", "RecenterKey", screen.recenterKey);
     screen.appName = "Remember Me VR";
     screen_.Configure(screen);
+    ue3Discover_ = config.GetBool("UE3", "Discover", true);
+    ue3DumpOnStart_ = config.GetBool("UE3", "DumpObjectsOnStart", true);
+    ue3DumpKey_ = config.GetInt("UE3", "DumpObjectsKey", 0x78);  // F9
     VR_LOG_INFO("VR %s: virtual screen %.1f m wide at %.1f m, recenter key 0x%02x", vrEnabled_ ? "on" : "off",
                 screen.width, screen.distance, screen.recenterKey);
   }
@@ -38,12 +43,18 @@ class RememberMe final : public vrcore::Game {
                 params.BackBufferWidth, params.BackBufferHeight, params.BackBufferCount, params.SwapEffect,
                 dxvk ? "DXVK interop available" : "no DXVK interop");
     if (!dxvk) VR_LOG_WARN("VR output needs DXVK's d3d9.dll (Proton's default, or dxvk next to the exe on Windows)");
-    // Engine (game-code) hooks will be installed here once M2 lands; gated on knownBuild_.
+    // The exe is unpacked and the engine initialised by now: map UE3's reflection.
+    if (ue3Discover_ && !reflection_.Valid() && reflection_.Discover() && ue3DumpOnStart_) DumpObjects("start");
   }
 
   void OnBeforeReset(IDirect3DDevice9*) override { screen_.OnDeviceChanged(); }
 
   void OnPresent(IDirect3DDevice9* device) override {
+    if (ue3DumpKey_) {
+      const bool down = (GetAsyncKeyState(ue3DumpKey_) & 0x8000) != 0;
+      if (down && !dumpKeyDown_ && reflection_.Valid()) DumpObjects("hotkey");
+      dumpKeyDown_ = down;
+    }
     if (vrEnabled_) screen_.OnPresent(device);
     ++frames_;
     if (presentLogInterval_ > 0 && frames_ % static_cast<uint64_t>(presentLogInterval_) == 0) {
@@ -54,7 +65,18 @@ class RememberMe final : public vrcore::Game {
   void OnDetach() override { VR_LOG_INFO("frames presented: %" PRIu64, frames_); }
 
  private:
+  void DumpObjects(const char* why) {
+    const std::wstring path = vrcore::ModDirectory() + L"RememberMeVR_objects.txt";
+    const int count = reflection_.DumpObjects(path.c_str());
+    VR_LOG_INFO("ue3: dumped %d objects (%s) to %s", count, why, vrcore::Narrow(path).c_str());
+  }
+
   bool knownBuild_ = false;
+  bool ue3Discover_ = true;
+  bool ue3DumpOnStart_ = true;
+  int ue3DumpKey_ = 0;
+  bool dumpKeyDown_ = false;
+  vrcore::ue3::Reflection reflection_;
   bool vrEnabled_ = true;
   vrcore::VirtualScreen screen_;
   int presentLogInterval_ = 0;

@@ -8,7 +8,9 @@ add_library(vrcore OBJECT
   src/dxvk_interop.cpp
   src/hook.cpp
   src/log.cpp
+  src/memory.cpp
   src/process.cpp
+  src/ue3/reflection.cpp
   src/vk.cpp
   src/xr/runtime_loader.cpp
   src/xr/virtual_screen.cpp
