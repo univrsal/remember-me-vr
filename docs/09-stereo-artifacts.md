@@ -9,10 +9,10 @@ Status as of 2026-11-26. Stereo, depth, head tracking and resolution work (M3 pa
 | A | Light/fog effect cut by horizontal bands (thickness varies with view angle) | right only | **Fixed** (confirmed in game 2026-11-26, flat test): `DNEResolution` ignored the view offset (below). `[Stereo] FixDNEResolution` |
 | B | Character shadow offset horizontally, opposite directions per eye (not under the feet) | both, mirrored | Reproduces in the flat F10 test with `TestFov` when symmetric projection is off. Not yet analysed in a capture |
 | C | Blue/shadow wedge on Nilin; puddle reflection band | right | Probably the same cause as A: no water-reflection issues seen with the fix (2026-11-26, brief flat test). Recheck the wedge on Nilin and puddles in VR |
-| D | Sensen AR hints: left eye only, misplaced, follow head roll | left | **Second version built, untested in game:** per-eye redraw from the game camera (`[Stereo] SensenStereo`), see "Artifact D" below |
+| D | Sensen AR hints: left eye only, misplaced, follow head roll | left | **Fixed** (confirmed in game 2026-11-26, flat test): per-eye redraw from the game camera, both views composited (`[Stereo] SensenStereo`), see "Artifact D" below |
 | E | Loading screen shows the level around the tips panel | both | Needs loading detection |
 | F | Monitor mirror has no UI in stereo frames | — | Open |
-| G | Smoke particles cut off, depth fog with a hard mask | right | **Second fix built, untested in game:** per-view scene-colour copy sampled the wrong region (below). `[Stereo] FixQuadTextureSize` |
+| G | Smoke particles cut off, depth fog with a hard mask | right | **Fixed** (confirmed in game 2026-11-26, flat test, f90a807): per-view scene-colour copy sampled the wrong region (below). `[Stereo] FixQuadTextureSize` |
 
 ## Reproduce and capture without VR
 
