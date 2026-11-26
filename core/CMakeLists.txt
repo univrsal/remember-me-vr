@@ -10,6 +10,7 @@ add_library(vrcore OBJECT
   src/log.cpp
   src/memory.cpp
   src/process.cpp
+  src/scene_tap.cpp
   src/ue3/reflection.cpp
   src/ue3/space.cpp
   src/ue3/types.cpp

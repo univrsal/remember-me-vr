@@ -7,6 +7,7 @@
 #include "vrcore/game.h"
 #include "vrcore/log.h"
 #include "vrcore/process.h"
+#include "vrcore/scene_tap.h"
 #include "vrcore/ue3.h"
 
 namespace {
@@ -33,6 +34,10 @@ class RememberMe final : public vrcore::Game {
     vr.recenterKey = config.GetInt("VR", "RecenterKey", vr.recenterKey);
     vr.appName = "Remember Me VR";
     compositor_.Configure(vr);
+    // Stereo frames from the game's scene image (internal, e.g. supersampled,
+    // resolution) instead of the window-sized backbuffer.
+    const bool sceneSource = config.GetString("VR", "StereoSource", "scene") == "scene";
+    vrcore::scene_tap::Enable(vrEnabled_ && sceneSource);
     ue3Discover_ = config.GetBool("UE3", "Discover", true);
     ue3DumpOnStart_ = config.GetBool("UE3", "DumpObjectsOnStart", true);
     ue3DumpKey_ = config.GetInt("UE3", "DumpObjectsKey", 0x78);  // F9
@@ -77,7 +82,11 @@ class RememberMe final : public vrcore::Game {
       if (down && !sbsKeyDown_) sceneViews_.ToggleSideBySide();
       sbsKeyDown_ = down;
     }
-    if (vrEnabled_) compositor_.OnPresent(device);
+    if (vrEnabled_) {
+      IDirect3DTexture9* scene = vrcore::scene_tap::Take();
+      compositor_.OnPresent(device, scene);
+      if (scene) scene->Release();
+    }
     ++frames_;
     if (presentLogInterval_ > 0 && frames_ % static_cast<uint64_t>(presentLogInterval_) == 0) {
       VR_LOG_DEBUG("present #%" PRIu64, frames_);

@@ -9,6 +9,7 @@
 #include "vrcore/game.h"
 #include "vrcore/hook.h"
 #include "vrcore/log.h"
+#include "vrcore/scene_tap.h"
 
 namespace vrcore::detail {
 namespace {
@@ -51,6 +52,7 @@ HRESULT STDMETHODCALLTYPE HookPresent(IDirect3DDevice9* self, const RECT* src, c
   t_inPresent = true;
   NotifyPresent(self, "IDirect3DDevice9::Present");
   const HRESULT hr = g_origPresent(self, src, dst, wnd, dirty);
+  scene_tap::detail::EndFrame();
   t_inPresent = false;
   return hr;
 }
@@ -65,6 +67,7 @@ HRESULT STDMETHODCALLTYPE HookSwapChainPresent(IDirect3DSwapChain9* self, const 
     device->Release();
   }
   const HRESULT hr = g_origSwapChainPresent(self, src, dst, wnd, dirty, flags);
+  scene_tap::detail::EndFrame();
   t_inPresent = false;
   return hr;
 }
@@ -73,6 +76,7 @@ HRESULT STDMETHODCALLTYPE HookReset(IDirect3DDevice9* self, D3DPRESENT_PARAMETER
   VR_LOG_INFO("Reset: %ux%u windowed=%d", params ? params->BackBufferWidth : 0,
               params ? params->BackBufferHeight : 0, params ? params->Windowed : -1);
   GetGame().OnBeforeReset(self);
+  scene_tap::detail::EndFrame();
   const HRESULT hr = g_origReset(self, params);
   if (FAILED(hr)) VR_LOG_WARN("Reset failed: 0x%08lx", hr);
   if (params) GetGame().OnAfterReset(self, *params, hr);
@@ -80,6 +84,7 @@ HRESULT STDMETHODCALLTYPE HookReset(IDirect3DDevice9* self, D3DPRESENT_PARAMETER
 }
 
 void HookDevice(IDirect3DDevice9* device) {
+  scene_tap::detail::InstallHooks(device);
   if (!g_origPresent) {
     hook::InstallVTable("IDirect3DDevice9::Present", device, kDevice_Present, &HookPresent, &g_origPresent);
     hook::InstallVTable("IDirect3DDevice9::Reset", device, kDevice_Reset, &HookReset, &g_origReset);

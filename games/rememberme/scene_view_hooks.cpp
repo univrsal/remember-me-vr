@@ -15,6 +15,7 @@ namespace rm {
 namespace {
 
 enum class RightEyeViewState { Own, Shared, None };
+using vrcore::ue3::Rot;
 
 // Per-eye overrides, active only while our own CalcSceneView calls run (game thread).
 struct EyeOverride {
@@ -23,6 +24,8 @@ struct EyeOverride {
   float testOffset = 0.0f;   // side-by-side test: shift along the view's right axis (uu)
   XrPosef pose{};
   XrFovf fov{};
+  bool haveRotation = false;  // set by the view-point hook
+  Rot rotation{};             // eye rotation computed there
 };
 
 struct State {
@@ -49,6 +52,8 @@ State g;
 CalcSceneViewFn g_origCalcSceneView = nullptr;
 GetPlayerViewPointFn g_origGetPlayerViewPoint = nullptr;
 PerspectiveMatrixFn g_origPerspectiveMatrix = nullptr;
+PovLookAtFn g_origPovLookAt = nullptr;
+void* g_povLookAtReturn = nullptr;
 AllocateViewStateFn g_allocateViewState = nullptr;
 
 template <typename T>
@@ -72,6 +77,8 @@ void __fastcall HookGetPlayerViewPoint(void* controller, void* /*edx*/, FVector*
                               g.base, g.eye.pose, g.unitsPerMeter, loc, rot);
     *location = {loc.x, loc.y, loc.z};
     *rotation = {rot.pitch, rot.yaw, rot.roll};
+    g.eye.rotation = rot;
+    g.eye.haveRotation = true;
   } else {
     // UE3: X forward, Y right, Z up; yaw in 65536ths of a turn. Right = (-sin, cos, 0).
     const float yaw = static_cast<float>(rotation->yaw) * (6.2831853f / 65536.0f);
@@ -85,6 +92,19 @@ float* __fastcall HookPerspectiveMatrix(float* out, void* /*edx*/, float halfFov
   float* result = g_origPerspectiveMatrix(out, halfFovX, halfFovY, multFovX, multFovY, minZ, maxZ);
   if (g.eye.active && g.eye.vr && result) vrcore::ue3::ApplyAsymmetricFov(result, g.eye.fov);
   return result;
+}
+
+void __fastcall HookPovLookAt(void* pov, void* /*edx*/, float lx, float ly, float lz, float tx, float ty, float tz) {
+  void* const caller = __builtin_return_address(0);
+  g_origPovLookAt(pov, lx, ly, lz, tx, ty, tz);
+  // Only the look-at in CalcSceneView, only during our eye calls: put the head
+  // rotation back (the target is kept, e.g. for depth-of-field focus).
+  if (caller == g_povLookAtReturn && g.eye.active && g.eye.vr && g.eye.haveRotation) {
+    auto* rotation = static_cast<int32_t*>(pov) + kPovRotation;
+    rotation[0] = g.eye.rotation.pitch;
+    rotation[1] = g.eye.rotation.yaw;
+    rotation[2] = g.eye.rotation.roll;
+  }
 }
 
 void* RightEyeState(void* leftState) {
@@ -211,12 +231,15 @@ bool SceneViewHooks::Install() {
   void* calcSceneView = exe.FromPreferredVA(kCalcSceneView);
   void* getPlayerViewPoint = exe.FromPreferredVA(kGetPlayerViewPoint);
   void* perspectiveMatrix = exe.FromPreferredVA(kPerspectiveMatrix);
+  void* povLookAt = exe.FromPreferredVA(kPovLookAt);
+  g_povLookAtReturn = exe.FromPreferredVA(kPovLookAtReturnInCalcSceneView);
   auto* allocateViewState = exe.FromPreferredVA<uint8_t>(kAllocateViewState);
   if (!CheckPrologue(calcSceneView, kCalcSceneViewPrologue, sizeof(kCalcSceneViewPrologue), "CalcSceneView") ||
       !CheckPrologue(getPlayerViewPoint, kGetPlayerViewPointPrologue, sizeof(kGetPlayerViewPointPrologue),
                      "GetPlayerViewPoint") ||
       !CheckPrologue(perspectiveMatrix, kPerspectiveMatrixPrologue, sizeof(kPerspectiveMatrixPrologue),
                      "FPerspectiveMatrix") ||
+      !CheckPrologue(povLookAt, kPovLookAtPrologue, sizeof(kPovLookAtPrologue), "POV look-at") ||
       !CheckPrologue(allocateViewState, kAllocateViewStatePrologueA, sizeof(kAllocateViewStatePrologueA),
                      "AllocateViewState") ||
       !CheckPrologue(allocateViewState + kAllocateViewStatePrologueBOffset, kAllocateViewStatePrologueB,
@@ -231,7 +254,9 @@ bool SceneViewHooks::Install() {
                             reinterpret_cast<void*>(&HookGetPlayerViewPoint),
                             reinterpret_cast<void**>(&g_origGetPlayerViewPoint)) &&
       vrcore::hook::Install("FPerspectiveMatrix", perspectiveMatrix, reinterpret_cast<void*>(&HookPerspectiveMatrix),
-                            reinterpret_cast<void**>(&g_origPerspectiveMatrix));
+                            reinterpret_cast<void**>(&g_origPerspectiveMatrix)) &&
+      vrcore::hook::Install("POV look-at", povLookAt, reinterpret_cast<void*>(&HookPovLookAt),
+                            reinterpret_cast<void**>(&g_origPovLookAt));
   VR_LOG_INFO("scene view hooks %s; VR stereo %s (world scale %.0f uu/m, camera orientation %s); side-by-side test "
               "%s (toggle key 0x%02x); right view state %s",
               ok ? "installed" : "FAILED", g.vrStereo ? "on" : "off", g.unitsPerMeter,

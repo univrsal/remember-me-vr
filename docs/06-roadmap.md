@@ -56,7 +56,12 @@ Each milestone reduces the risk of the next one. **Milestone 3 is the go/no-go g
   - `vrcore::Compositor` replaces `VirtualScreen`. The game thread calls `BeginStereoFrame` (OpenXR eye poses + FOVs predicted one display period after the last `xrWaitFrame`), renders, then `SubmitStereoFrame`. The next `Present` submits the backbuffer halves as a projection layer with exactly those poses. Frames without stereo data (loading screens, videos) fall back to the flat panel.
   - Per eye, `CalcSceneView` runs with its viewport half, view state, eye pose (`eventGetPlayerViewPoint` hook: game camera, yaw only by default, plus tracked eye pose; world scale configurable) and asymmetric projection (`FPerspectiveMatrix` hook, x/y terms replaced, depth terms kept).
   - Conversions are in `vrcore/ue3_space` with a host unit test (`tools/space-test.sh`, run in CI).
-- [ ] Verify in the headset: correct stereo depth/scale, head tracking (view only), recenter, frame pacing
+- [x] First headset test (2026-11-26, Proton): stereo depth correct; smooth enough. Found:
+  - **Resolution tied to the window** (recommended 2368×2628 per eye = a 4736×2628 window, larger than the monitor). Fix: stereo frames now come from the game's scene image (scene tap: texture sampled by the first draw into the backbuffer), so resolution = window × `SuperSampleCount`.
+  - **In game only head roll worked.** DNE's camera look-at (`0x008091C0`, called from CalcSceneView when the PlayerCamera has a target) recomputes pitch/yaw toward the target (and made the eyes toe in). Fix: hook it and restore the eye rotation, only for the call from CalcSceneView (return address `0x008625E9`) during our eye calls.
+  - **Right-eye puddle reflections** show a flat band (`puddle_red_band_stereo.rdc`); not yet located (see 08).
+  - Sensen AR hints follow head roll and are misplaced (they use the game camera; part of the per-eye Sensen work).
+- [ ] Verify the fixes in the headset: head tracking in game, resolution via SuperSampleCount, recenter, frame pacing
 - [ ] Tune defaults: world scale, camera orientation mode
 - **Exit criteria:** correct, comfortable stereo while walking and fighting in one chapter, at the HMD's refresh rate or with stable reprojection. Both eyes always from the same tick.
 - **Go/no-go:** S2 (two views per family) is implemented; if it proves unusable in the headset, fall back to S1 (draw the viewport twice per tick). Shader-level stereo is the very last thing to consider (see 03).

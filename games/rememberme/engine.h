@@ -42,6 +42,19 @@ constexpr uint32_t kPerspectiveMatrix = 0x008092B0;
 constexpr uint8_t kPerspectiveMatrixPrologue[] = {0xF3, 0x0F, 0x10, 0x54, 0x24, 0x14,
                                                   0xF3, 0x0F, 0x10, 0x4C, 0x24, 0x18};
 
+// DNE camera look-at: (TPOV* this, FVector location, FVector target) by value,
+// ret 0x18. Sets POV location/target and recomputes POV *pitch and yaw* from the
+// direction to the target, keeping roll. CalcSceneView calls it after
+// GetPlayerViewPoint whenever the PlayerCamera has a target (in game: Nilin),
+// which overrides any head rotation. POV ints: [3] pitch, [4] yaw, [5] roll.
+using PovLookAtFn = void(__attribute__((thiscall)) *)(void* pov, float lx, float ly, float lz, float tx, float ty,
+                                                      float tz);
+constexpr uint32_t kPovLookAt = 0x008091C0;
+constexpr uint8_t kPovLookAtPrologue[] = {0x83, 0xEC, 0x18, 0x8B, 0x44, 0x24, 0x1C, 0xF3, 0x0F, 0x10, 0x44, 0x24, 0x28};
+// Return address of the call in CalcSceneView (0x008625E4 + 5); other callers are left alone.
+constexpr uint32_t kPovLookAtReturnInCalcSceneView = 0x008625E9;
+constexpr uint32_t kPovRotation = 3;  // int32 index of pitch; yaw, roll follow
+
 // AllocateViewState(): `new FSceneViewState` (0x380 bytes, ctor 0x00A1FEE0), as
 // called by the ULocalPlayer constructor (0x008698F0) for LocalPlayer->ViewState.
 using AllocateViewStateFn = void* (*)();

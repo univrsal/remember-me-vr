@@ -51,7 +51,11 @@ class Compositor {
 
   // Presenting thread, before the original Present. Blocks in xrWaitFrame,
   // which paces the game to the headset while the session is running.
-  void OnPresent(IDirect3DDevice9* device);
+  // `sceneTexture` (optional, see scene_tap.h) is the game's final scene image
+  // before UI, at its internal resolution: stereo frames are taken from it
+  // (resolution independent of the window) when its size/format fit,
+  // otherwise from the backbuffer.
+  void OnPresent(IDirect3DDevice9* device, IDirect3DTexture9* sceneTexture = nullptr);
   // Device reset/recreation: drops the swapchain (sizes may change).
   void OnDeviceChanged();
   // Tears down OpenXR + Vulkan objects. Only while the D3D9 device is alive;
@@ -69,12 +73,23 @@ class Compositor {
   uint32_t EyeHeight() const { return eyeHeight_; }
 
  private:
+  struct Swapchain {
+    XrSwapchain handle = XR_NULL_HANDLE;
+    std::vector<VkImage> images;
+    uint32_t width = 0;
+    uint32_t height = 0;
+    bool rawCopy = true;  // vkCmdCopyImage (bit-exact) vs vkCmdBlitImage
+    const char* name = "";
+  };
+
   bool EnsureInit(const DxvkInterop& dxvk);
-  bool EnsureSwapchain(uint32_t width, uint32_t height);
-  void DestroySwapchain();
+  bool EnsureSwapchain(Swapchain& swapchain, uint32_t width, uint32_t height);
+  void DestroySwapchain(Swapchain& swapchain);
+  void DestroySwapchains();
   void DestroyVulkan();
-  bool CopyToSwapchain(const DxvkInterop& dxvk, IDirect3DSurface9* backbuffer, VkImage target, uint32_t width,
-                       uint32_t height);
+  // Copies (0,0)-(width,height) of `source` into the swapchain's next image.
+  bool CopyToSwapchain(const DxvkInterop& dxvk, IDirect3DSurface9* source, bool sourceIsBgra8, Swapchain& swapchain,
+                       uint32_t width, uint32_t height);
   bool PopStereoFrame(StereoFrame& out);
 
   Settings settings_;
@@ -86,12 +101,9 @@ class Compositor {
   VkCommandBuffer cmd_ = VK_NULL_HANDLE;
   VkFence fence_ = VK_NULL_HANDLE;
 
-  XrSwapchain swapchain_ = XR_NULL_HANDLE;
-  std::vector<VkImage> swapchainImages_;
-  int64_t swapchainFormat_ = 0;
-  bool rawCopy_ = true;
-  uint32_t width_ = 0;
-  uint32_t height_ = 0;
+  Swapchain stereoSwapchain_{.name = "stereo"};
+  Swapchain screenSwapchain_{.name = "screen"};
+  int sceneSourceLogged_ = -1;  // last logged stereo source (0 backbuffer, n = scene at n x)
 
   // Game thread -> presenting thread.
   std::atomic<bool> stereoReady_{false};

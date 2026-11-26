@@ -65,6 +65,8 @@ The engine's `GamePlayers` array is at `GEngine + 0x4EC` (`GEngine` = `*(0x01643
 | `FPerspectiveMatrix(HalfFOVX, HalfFOVY, MultX, MultY, MinZ, MaxZ)` | `0x008092B0` | `__thiscall`, `this` = output 4×4 (row-major), `ret 0x18`. `M00 = MultX/tan(HalfX)`, `M11 = MultY/tan(HalfY)`; with `MinZ == MaxZ` (as CalcSceneView calls it): `M22 = 0.999`, `M23 = 1`, `M32 = -MinZ·0.999` (infinite far plane, **standard depth**, UE3 `Z_PRECISION = 0.001`). Near plane global `0x0154F6B4` = 10.0 |
 | `APlayerController::GetPlayerViewPoint` (probably) | `0x006A49F0` | fills view location/rotation in CalcSceneView; **to verify** |
 | `AExamplePlayerCamera::UpdateCameraBehaviour` (C++) | camera vtable `+0x494` | from the `exec` thunk |
+| DNE camera look-at `TPOV::LookAt(FVector loc, FVector target)` | `0x008091C0` | `__thiscall`, `ret 0x18`. Sets POV location/target and **recomputes pitch/yaw toward the target, keeping roll**. Called in CalcSceneView (return address `0x008625E9`) when `PlayerCamera` (vtable `+0x4AC`, via `0x00699360`) provides a target. Also called from 8 DNE camera functions |
+| PlayerCamera target query | `0x00699360` | `__fastcall(controller)`: `PlayerCamera ? PlayerCamera->vtable[0x4AC]() : 0` |
 | `ULocalPlayer::ULocalPlayer` (constructor) | `0x008698F0` | sets the LocalPlayer vtables; `ViewState = AllocateViewState()` |
 | `AllocateViewState()` | `0x00A22B90` | `new FSceneViewState` (`0x380` bytes, ctor `0x00A1FEE0`); no args, returns the pointer |
 | `eventGetPlayerViewPoint` thunk | `0x006A49F0` | `__thiscall(controller, FVector*, FRotator*)`, `ret 8`; calls the script event via `ProcessEvent` (confirmed) |
@@ -117,6 +119,7 @@ Both views land in the same family, so the renderer draws both eyes in one pass.
 - ~~Whether any DNE render pass breaks with two views in a family~~: **the 3D scene renders correctly in both views** (side-by-side test, 2026-11-26: lighting, fog, particles, DOF and post-process all per view, ~170 fps at 1880×2090). Only the UI misbehaves:
   - **2D UI (Scaleform menus/HUD) is laid out in the first view's rectangle.** The pause menu was squeezed into the left half. The UI sizes itself from View[0]'s rect, not from `LocalPlayer.Origin/Size` (which we restore after `CalcSceneView`).
   - **World-space AR hints are UI, not scene geometry.** E.g. "Caution: Leapers territory" is drawn in perspective but only in the left view, so it's projected with View[0]'s camera in the UI pass. That's why the GFx pass in the captures (07) runs with depth testing against scene depth.
+- **Right-eye reflections** (puddles) show a flat band (`puddle_red_band_stereo.rdc`). Viewport comparison doesn't single out the pass; next step: follow `DNEReflection`/`ImageReflection` shaders in Ghidra as was done for Sensen.
 - Where the UI pass gets its viewport and projection. Stereo captures (`pause_menu_stereo`, `in_world_hint_stereo`, 2026-11-26), analysed with `re/scripts/viewports.py`:
   - All 3D and post-process passes run once per view, with left (`x=0`) and right (`x=940`) viewports. Half-res passes are split per view too.
   - **2D UI** (pause menu): one pass of Scaleform draws straight into the backbuffer after the scene copy, with the D3D viewport = **View[0]'s rect** (`0,0 940×2089`). A full-target viewport during the UI phase should un-squeeze it.
