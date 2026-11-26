@@ -10,6 +10,7 @@
 
 #include "vrcore/vk.h"
 #include "vrcore/xr.h"
+#include "vrcore/xr_input.h"
 
 namespace vrcore {
 
@@ -74,6 +75,10 @@ class Compositor {
   // Game thread: the frame was rendered with `frame`; the next Present submits it.
   void SubmitStereoFrame(const StereoFrame& frame);
 
+  // Controller input (any thread): latest synced state, and rumble requests.
+  xr::ControllerState Controllers() const { return input_.State(); }
+  void Vibrate(float left, float right) { input_.Vibrate(left, right); }
+
   // True while the OpenXR session runs in stereo mode (frames can be stereo).
   bool StereoActive() const { return stereoReady_.load(); }
 
@@ -103,6 +108,7 @@ class Compositor {
 
   Settings settings_;
   xr::Context xr_;
+  xr::Input input_;
   vk::Functions vk_{};
   IDirect3DDevice9* device_ = nullptr;  // identity only, not ref-counted
   VkDevice vkDevice_ = VK_NULL_HANDLE;

@@ -86,7 +86,7 @@ Each milestone reduces the risk of the next one. **Milestone 3 is the go/no-go g
 
 - [ ] First-person camera mode
 - [ ] Free camera mode
-- [ ] Valve Index controller support (OpenXR actions mapped to the game's input)
+- [ ] Valve Index controller support (built, untested): OpenXR actions (`vrcore::xr::Input`: Index bindings, Touch and simple-controller fallbacks, haptics) presented to the game as player 0's XInput gamepad. The game imports `xinput1_3` by ordinal (2 `XInputGetState`, 3 `XInputSetState`); both are hooked (`games/rememberme/vr_gamepad.cpp`), merged with a real gamepad if connected, rumble goes to the controllers. Mapping: sticks (+click), triggers = LT/RT, grips = LB/RB, right A/B = A/B, left A/B = X/Y, right trackpad press = Start, left trackpad press = Back (centre) / D-pad (edges); Touch menu = Start. `[Input] VRControllers`, `GripThreshold`
 
 ## M6 — Performance (only if needed)
 

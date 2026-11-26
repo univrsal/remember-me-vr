@@ -17,7 +17,8 @@ add_library(vrcore OBJECT
   src/vk.cpp
   src/xr/runtime_loader.cpp
   src/xr/compositor.cpp
-  src/xr/xr_context.cpp)
+  src/xr/xr_context.cpp
+  src/xr/xr_input.cpp)
 
 target_include_directories(vrcore PUBLIC include)
 target_link_libraries(vrcore PUBLIC minhook vulkan_headers openxr_headers)

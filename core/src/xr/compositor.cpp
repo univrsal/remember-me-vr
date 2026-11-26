@@ -70,6 +70,7 @@ void Compositor::OnPresent(IDirect3DDevice9* device, IDirect3DTexture9* sceneTex
       // Vulkan objects instead of destroying them through a dead device.
       VR_LOG_WARN("compositor: D3D9 device changed, restarting VR");
       stereoReady_ = false;
+      input_.Reset();
       xr_.Shutdown();
       stereoSwapchain_ = Swapchain{.name = "stereo"};
       screenSwapchain_ = Swapchain{.name = "screen"};
@@ -93,6 +94,7 @@ void Compositor::OnPresent(IDirect3DDevice9* device, IDirect3DTexture9* sceneTex
                 static_cast<unsigned long long>(kInitRetryMs / 1000));
     stereoReady_ = false;
     DestroySwapchains();
+    input_.Reset();
     xr_.Shutdown();
     nextInitAttemptMs_ = GetTickCount64() + kInitRetryMs;
     return;
@@ -130,6 +132,7 @@ void Compositor::OnPresent(IDirect3DDevice9* device, IDirect3DTexture9* sceneTex
     xr_.Recenter(frame.predictedDisplayTime);
     recenterPending_ = false;
   }
+  input_.Sync(xr_);
 
   StereoFrame stereo;
   const bool haveStereo = PopStereoFrame(stereo);
@@ -282,6 +285,7 @@ bool Compositor::EnsureInit(const DxvkInterop& dxvk) {
                 static_cast<unsigned long long>(kInitRetryMs / 1000));
     return false;
   }
+  input_.Init(xr_);  // controller actions; failure only means no controller input
   eyeWidth_ = xr_.RecommendedEyeWidth();
   eyeHeight_ = xr_.RecommendedEyeHeight();
   if (settings_.mode == Mode::Stereo) {
@@ -480,6 +484,7 @@ void Compositor::DestroyVulkan() {
 void Compositor::Shutdown() {
   stereoReady_ = false;
   DestroySwapchains();
+  input_.Reset();
   xr_.Shutdown();
   DestroyVulkan();
   device_ = nullptr;

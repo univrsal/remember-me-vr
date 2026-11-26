@@ -9,6 +9,7 @@
 #include "renderer_hooks.h"
 #include "scene_view_hooks.h"
 #include "sensen_stereo.h"
+#include "vr_gamepad.h"
 #include "vrcore/compositor.h"
 #include "vrcore/game.h"
 #include "vrcore/log.h"
@@ -59,6 +60,7 @@ class RememberMe final : public vrcore::Game {
     engineHooks_ = config.GetBool("Stereo", "EngineHooks", true);
     disableMotionBlur_ = config.GetBool("VR", "DisableMotionBlur", true);
     sceneViews_.Configure(config, vrEnabled_ ? &compositor_ : nullptr);
+    rm::vr_gamepad::Configure(config, vrEnabled_ ? &compositor_ : nullptr);
     rm::renderer_hooks::Configure(config);
     rm::sensen_stereo::Configure(config);
     rm::draw_fixes::Configure(config);
@@ -74,6 +76,7 @@ class RememberMe final : public vrcore::Game {
                 params.BackBufferWidth, params.BackBufferHeight, params.BackBufferCount, params.SwapEffect,
                 dxvk ? "DXVK interop available" : "no DXVK interop");
     if (!dxvk) VR_LOG_WARN("VR output needs DXVK's d3d9.dll (Proton's default, or dxvk next to the exe on Windows)");
+    rm::vr_gamepad::Install();
     // The exe is unpacked and the engine initialised by now: map UE3's reflection.
     // Hard-coded engine addresses: only on the build they were found in.
     if (engineHooks_ && !engineHooksInstalled_) {
