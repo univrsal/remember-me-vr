@@ -3,11 +3,11 @@
 #include <cinttypes>
 
 #include "scene_view_hooks.h"
+#include "vrcore/compositor.h"
 #include "vrcore/game.h"
 #include "vrcore/log.h"
 #include "vrcore/process.h"
 #include "vrcore/ue3.h"
-#include "vrcore/virtual_screen.h"
 
 namespace {
 
@@ -25,19 +25,22 @@ class RememberMe final : public vrcore::Game {
     knownBuild_ = knownBuild;
     presentLogInterval_ = config.GetInt("Debug", "PresentLogInterval", 0);
     vrEnabled_ = config.GetBool("VR", "Enabled", true);
-    vrcore::VirtualScreen::Settings screen;
-    screen.distance = config.GetFloat("VR", "ScreenDistance", screen.distance);
-    screen.width = config.GetFloat("VR", "ScreenWidth", screen.width);
-    screen.recenterKey = config.GetInt("VR", "RecenterKey", screen.recenterKey);
-    screen.appName = "Remember Me VR";
-    screen_.Configure(screen);
+    vrcore::Compositor::Settings vr;
+    vr.mode = config.GetString("VR", "Mode", "stereo") == "screen" ? vrcore::Compositor::Mode::Screen
+                                                                   : vrcore::Compositor::Mode::Stereo;
+    vr.screenDistance = config.GetFloat("VR", "ScreenDistance", vr.screenDistance);
+    vr.screenWidth = config.GetFloat("VR", "ScreenWidth", vr.screenWidth);
+    vr.recenterKey = config.GetInt("VR", "RecenterKey", vr.recenterKey);
+    vr.appName = "Remember Me VR";
+    compositor_.Configure(vr);
     ue3Discover_ = config.GetBool("UE3", "Discover", true);
     ue3DumpOnStart_ = config.GetBool("UE3", "DumpObjectsOnStart", true);
     ue3DumpKey_ = config.GetInt("UE3", "DumpObjectsKey", 0x78);  // F9
     engineHooks_ = config.GetBool("Stereo", "EngineHooks", true);
-    sceneViews_.Configure(config);
-    VR_LOG_INFO("VR %s: virtual screen %.1f m wide at %.1f m, recenter key 0x%02x", vrEnabled_ ? "on" : "off",
-                screen.width, screen.distance, screen.recenterKey);
+    sceneViews_.Configure(config, vrEnabled_ ? &compositor_ : nullptr);
+    VR_LOG_INFO("VR %s: mode %s, screen fallback %.1f m wide at %.1f m, recenter key 0x%02x",
+                vrEnabled_ ? "on" : "off", vr.mode == vrcore::Compositor::Mode::Stereo ? "stereo" : "screen",
+                vr.screenWidth, vr.screenDistance, vr.recenterKey);
   }
 
   void OnDeviceCreated(IDirect3DDevice9*, const D3DPRESENT_PARAMETERS& params,
@@ -61,7 +64,7 @@ class RememberMe final : public vrcore::Game {
     }
   }
 
-  void OnBeforeReset(IDirect3DDevice9*) override { screen_.OnDeviceChanged(); }
+  void OnBeforeReset(IDirect3DDevice9*) override { compositor_.OnDeviceChanged(); }
 
   void OnPresent(IDirect3DDevice9* device) override {
     if (ue3DumpKey_) {
@@ -74,7 +77,7 @@ class RememberMe final : public vrcore::Game {
       if (down && !sbsKeyDown_) sceneViews_.ToggleSideBySide();
       sbsKeyDown_ = down;
     }
-    if (vrEnabled_) screen_.OnPresent(device);
+    if (vrEnabled_) compositor_.OnPresent(device);
     ++frames_;
     if (presentLogInterval_ > 0 && frames_ % static_cast<uint64_t>(presentLogInterval_) == 0) {
       VR_LOG_DEBUG("present #%" PRIu64, frames_);
@@ -106,7 +109,7 @@ class RememberMe final : public vrcore::Game {
   bool sbsKeyDown_ = false;
   rm::SceneViewHooks sceneViews_;
   bool vrEnabled_ = true;
-  vrcore::VirtualScreen screen_;
+  vrcore::Compositor compositor_;
   int presentLogInterval_ = 0;
   uint64_t frames_ = 0;
 };

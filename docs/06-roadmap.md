@@ -51,7 +51,11 @@ Each milestone reduces the risk of the next one. **Milestone 3 is the go/no-go g
 
 ## M3 — Synchronous stereo (go/no-go)
 
-- [ ] Two views per family via the `CalcSceneView` hook (S2), with per-eye viewport half, view state, eye offset and asymmetric projection. If DNE passes break with two views: draw the viewport twice per tick instead (S1)
+- [x] Two views per family via the `CalcSceneView` hook (S2), with per-eye viewport half and own view state (side-by-side test, M2)
+- [ ] **Stereo in VR (built 2026-11-26, untested in the headset):**
+  - `vrcore::Compositor` replaces `VirtualScreen`. The game thread calls `BeginStereoFrame` (OpenXR eye poses + FOVs predicted one display period after the last `xrWaitFrame`), renders, then `SubmitStereoFrame`. The next `Present` submits the backbuffer halves as a projection layer with exactly those poses. Frames without stereo data (loading screens, videos) fall back to the flat panel.
+  - Per eye, `CalcSceneView` runs with its viewport half, view state, eye pose (`eventGetPlayerViewPoint` hook: game camera, yaw only by default, plus tracked eye pose; world scale configurable) and asymmetric projection (`FPerspectiveMatrix` hook, x/y terms replaced, depth terms kept).
+  - Conversions are in `vrcore/ue3_space` with a host unit test (`tools/space-test.sh`, run in CI).
 - [ ] Capture both eyes; suppress the first present; submit both eyes in one OpenXR projection layer with matching poses
 - [ ] Head tracking applied to the view only
 - [ ] Check the side effects of drawing twice (HUD script, counters, scene captures)
@@ -63,9 +67,16 @@ Each milestone reduces the risk of the next one. **Milestone 3 is the go/no-go g
 - [ ] HUD and menus redirected to a quad layer
 - [ ] Bink FMV cinema mode; decide how to handle in-engine cutscenes (stereo with the camera locked, or a theatre view)
 - [ ] Comfort: no roll or shakes; world scale; recentre; INI config
-- [ ] Optional: motion-controller → XInput mapping
+- [ ] 2D UI (menus/HUD) to a full-size HUD texture on a quad layer (currently laid out in the left eye's rect, see 08)
+- [ ] Sensen AR hints rendered per eye (currently left eye only, see 08)
 
-## M5 — Performance (only if needed)
+## M5 — Final touches (requested)
+
+- [ ] First-person camera mode
+- [ ] Free camera mode
+- [ ] Valve Index controller support (OpenXR actions mapped to the game's input)
+
+## M6 — Performance (only if needed)
 
 - [ ] Two views in one family (S2) to share shadows, cubemap and scene setup between eyes
 - [ ] Measure against S1 and keep whichever is better

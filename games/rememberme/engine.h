@@ -31,6 +31,17 @@ using GetPlayerViewPointFn = void(__attribute__((thiscall)) *)(void* controller,
 constexpr uint32_t kGetPlayerViewPoint = 0x006A49F0;
 constexpr uint8_t kGetPlayerViewPointPrologue[] = {0x83, 0xEC, 0x18, 0x53, 0x55, 0x56, 0x8B, 0x74, 0x24, 0x28};
 
+// FPerspectiveMatrix::FPerspectiveMatrix(HalfFOVX, HalfFOVY, MultFOVX, MultFOVY, MinZ, MaxZ):
+// writes a row-major 4x4 into `out` (this). View space: x right, y up, z forward.
+// M[0][0] = MultX/tan(HalfX), M[1][1] = MultY/tan(HalfY); with MinZ == MaxZ (as
+// CalcSceneView calls it) infinite far plane: M[2][2] = 0.999, M[2][3] = 1,
+// M[3][2] = -MinZ*0.999. Standard (not reversed) depth. ret 0x18.
+using PerspectiveMatrixFn = float*(__attribute__((thiscall)) *)(float* out, float halfFovX, float halfFovY,
+                                                                float multFovX, float multFovY, float minZ, float maxZ);
+constexpr uint32_t kPerspectiveMatrix = 0x008092B0;
+constexpr uint8_t kPerspectiveMatrixPrologue[] = {0xF3, 0x0F, 0x10, 0x54, 0x24, 0x14,
+                                                  0xF3, 0x0F, 0x10, 0x4C, 0x24, 0x18};
+
 // AllocateViewState(): `new FSceneViewState` (0x380 bytes, ctor 0x00A1FEE0), as
 // called by the ULocalPlayer constructor (0x008698F0) for LocalPlayer->ViewState.
 using AllocateViewStateFn = void* (*)();

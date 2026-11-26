@@ -36,6 +36,9 @@ jobs:
       - name: Build
         run: cmake --build --preset mingw-i686-release
 
+      - name: Unit tests (host)
+        run: tools/space-test.sh
+
       - name: Package
         id: package
         run: |

@@ -62,7 +62,7 @@ The engine's `GamePlayers` array is at `GEngine + 0x4EC` (`GEngine` = `*(0x01643
 | `UGameViewportClient::Draw(FViewport*, FCanvas*)` | `0x0086D7F0` | `FViewportClient` vtable slot 2 (7,813 bytes) |
 | `ULocalPlayer::CalcSceneView` | `0x008622B0` | called from Draw's per-player loop; UE3 early-out on `Actor`/`Size` |
 | `FSceneView::FSceneView` | `0x00A17F80` | called from CalcSceneView with `this->ViewState`; views are `0x670` bytes |
-| `FPerspectiveMatrix(HalfFOVX, HalfFOVY, MultX, MultY, MinZ, MaxZ)` | `0x008092B0` | called with `MinZ == MaxZ` (infinite far plane); near plane global at `0x0154F6B4` |
+| `FPerspectiveMatrix(HalfFOVX, HalfFOVY, MultX, MultY, MinZ, MaxZ)` | `0x008092B0` | `__thiscall`, `this` = output 4×4 (row-major), `ret 0x18`. `M00 = MultX/tan(HalfX)`, `M11 = MultY/tan(HalfY)`; with `MinZ == MaxZ` (as CalcSceneView calls it): `M22 = 0.999`, `M23 = 1`, `M32 = -MinZ·0.999` (infinite far plane, **standard depth**, UE3 `Z_PRECISION = 0.001`). Near plane global `0x0154F6B4` = 10.0 |
 | `APlayerController::GetPlayerViewPoint` (probably) | `0x006A49F0` | fills view location/rotation in CalcSceneView; **to verify** |
 | `AExamplePlayerCamera::UpdateCameraBehaviour` (C++) | camera vtable `+0x494` | from the `exec` thunk |
 | `ULocalPlayer::ULocalPlayer` (constructor) | `0x008698F0` | sets the LocalPlayer vtables; `ViewState = AllocateViewState()` |

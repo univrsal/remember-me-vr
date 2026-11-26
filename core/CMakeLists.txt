@@ -11,10 +11,11 @@ add_library(vrcore OBJECT
   src/memory.cpp
   src/process.cpp
   src/ue3/reflection.cpp
+  src/ue3/space.cpp
   src/ue3/types.cpp
   src/vk.cpp
   src/xr/runtime_loader.cpp
-  src/xr/virtual_screen.cpp
+  src/xr/compositor.cpp
   src/xr/xr_context.cpp)
 
 target_include_directories(vrcore PUBLIC include)

@@ -27,6 +27,7 @@ games/rememberme/         Remember Me module
 tests/smoke_host.cpp      stand-in game exe for testing a build under Wine
 tools/deploy.sh           install/uninstall into the game folder
 tools/smoke-test.sh       run the smoke host under Wine with the built mod
+tools/space-test.sh       host unit test for the OpenXR <-> UE3 conversions (run in CI)
 tools/package.sh          zip a build for release (used by CI)
 tools/setup-openxr-i686.sh  one-time: let 32-bit OpenXR apps use SteamVR on Linux
 .github/workflows/        CI: build + package on push/PR, release on v* tags
@@ -83,7 +84,9 @@ For VR on Linux, two more things are needed:
 1. **Once per user:** `tools/setup-openxr-i686.sh`. SteamVR's default OpenXR runtime manifest points at its 64-bit library, which a 32-bit game's Proton OpenXR bridge can't load ("wrong ELF class"). The script writes `~/.config/openxr/1/active_runtime.i686.json`, pointing 32-bit clients at SteamVR's 32-bit `bin/vrclient.so`. 64-bit apps are unaffected; `--remove` undoes it.
 2. **Every session:** start SteamVR *before* the game. DXVK asks the runtime for its Vulkan extensions when the game creates its device.
 
-Press F8 (configurable) to recenter the screen.
+Press F8 (configurable) to recenter the view.
+
+`RememberMeVR.ini` `[VR]` options: `Mode` (`stereo` or `screen`), `WorldScale` (Unreal units per metre), `CameraOrientation` (`yaw` keeps the horizon level; `full` follows the game camera), flat-panel size/distance, recenter key. In stereo mode the game window holds both eyes side by side; the log suggests the window size for 1:1 pixels (`ExampleAdriftGfxConfig.ini`, see docs/05).
 
 The log is written to `Binaries/Win32/RememberMeVR.log`. Set `[Core] Enabled=0` in the INI to turn the mod into a plain pass-through proxy.
 

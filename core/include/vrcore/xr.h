@@ -4,6 +4,8 @@
 // platform headers come first (openxr_platform.h needs windows.h/unknwn.h and
 // vulkan.h; XR_USE_* and XR_NO_PROTOTYPES are set by the openxr_headers target).
 
+#include <atomic>
+#include <mutex>
 #include <string>
 #include <vector>
 
@@ -58,6 +60,15 @@ class Context {
   // Recenters the LOCAL space on the head pose at `time` (yaw + position only).
   void Recenter(XrTime time);
 
+  // Per-eye poses (in LocalSpace) and FOVs for the primary stereo view
+  // configuration at `time`. Thread-safe against Recenter/Shutdown, so it may be
+  // called from another thread than the frame loop (e.g. the game thread).
+  bool LocateEyes(XrTime time, XrView out[2]);
+
+  // Recommended per-eye image size reported by the runtime.
+  uint32_t RecommendedEyeWidth() const { return eyeWidth_; }
+  uint32_t RecommendedEyeHeight() const { return eyeHeight_; }
+
   template <typename Fn>
   Fn Proc(const char* name) const {
     PFN_xrVoidFunction fn = nullptr;
@@ -85,6 +96,8 @@ class Context {
     PFN_xrWaitSwapchainImage WaitSwapchainImage;
     PFN_xrReleaseSwapchainImage ReleaseSwapchainImage;
     PFN_xrEnumerateSwapchainFormats EnumerateSwapchainFormats;
+    PFN_xrLocateViews LocateViews;
+    PFN_xrEnumerateViewConfigurationViews EnumerateViewConfigurationViews;
   } fn{};
 
  private:
@@ -99,8 +112,12 @@ class Context {
   XrSpace localSpace_ = XR_NULL_HANDLE;
   XrSpace viewSpace_ = XR_NULL_HANDLE;
   XrSessionState state_ = XR_SESSION_STATE_UNKNOWN;
-  bool running_ = false;
+  std::atomic<bool> running_{false};
   std::vector<int64_t> formats_;
+  uint32_t eyeWidth_ = 0;
+  uint32_t eyeHeight_ = 0;
+  // Guards session/space lifetime between the frame-loop thread and LocateEyes callers.
+  mutable std::mutex mutex_;
 };
 
 }  // namespace vrcore::xr

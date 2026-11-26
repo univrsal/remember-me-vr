@@ -127,6 +127,8 @@ bool Context::CreateInstance(const char* appName) {
   VR_XR_LOAD(WaitSwapchainImage)
   VR_XR_LOAD(ReleaseSwapchainImage)
   VR_XR_LOAD(EnumerateSwapchainFormats)
+  VR_XR_LOAD(LocateViews)
+  VR_XR_LOAD(EnumerateViewConfigurationViews)
 #undef VR_XR_LOAD
 
   XrInstanceProperties instanceProps{XR_TYPE_INSTANCE_PROPERTIES};
@@ -151,6 +153,18 @@ bool Context::CreateInstance(const char* appName) {
     VR_LOG_INFO("xr: system \"%s\" (vendor 0x%x), max swapchain %ux%u, %u layers", systemProps.systemName,
                 systemProps.vendorId, systemProps.graphicsProperties.maxSwapchainImageWidth,
                 systemProps.graphicsProperties.maxSwapchainImageHeight, systemProps.graphicsProperties.maxLayerCount);
+  }
+  uint32_t viewCount = 0;
+  fn.EnumerateViewConfigurationViews(instance_, system_, XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO, 0, &viewCount,
+                                     nullptr);
+  std::vector<XrViewConfigurationView> configViews(viewCount, {XR_TYPE_VIEW_CONFIGURATION_VIEW});
+  if (viewCount >= 2 && XR_SUCCEEDED(fn.EnumerateViewConfigurationViews(instance_, system_,
+                                                                        XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO,
+                                                                        viewCount, &viewCount, configViews.data()))) {
+    eyeWidth_ = configViews[0].recommendedImageRectWidth;
+    eyeHeight_ = configViews[0].recommendedImageRectHeight;
+    VR_LOG_INFO("xr: recommended eye resolution %ux%u (max %ux%u)", eyeWidth_, eyeHeight_,
+                configViews[0].maxImageRectWidth, configViews[0].maxImageRectHeight);
   }
   return true;
 }
@@ -265,6 +279,7 @@ bool Context::CreateLocalSpace(const XrPosef& pose) {
 }
 
 void Context::Recenter(XrTime time) {
+  std::lock_guard<std::mutex> lock(mutex_);
   if (session_ == XR_NULL_HANDLE || time == 0) return;
   // Locate the head relative to the raw LOCAL origin, then rebase our space on
   // its position and yaw (ignoring pitch/roll so the screen stays upright).
@@ -328,7 +343,24 @@ bool Context::PollEvents() {
   return true;
 }
 
+bool Context::LocateEyes(XrTime time, XrView out[2]) {
+  std::lock_guard<std::mutex> lock(mutex_);
+  if (!running_ || session_ == XR_NULL_HANDLE || localSpace_ == XR_NULL_HANDLE || time == 0) return false;
+  XrViewLocateInfo info{XR_TYPE_VIEW_LOCATE_INFO};
+  info.viewConfigurationType = XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO;
+  info.displayTime = time;
+  info.space = localSpace_;
+  XrViewState state{XR_TYPE_VIEW_STATE};
+  out[0] = {XR_TYPE_VIEW};
+  out[1] = {XR_TYPE_VIEW};
+  uint32_t count = 0;
+  const XrResult result = fn.LocateViews(session_, &info, &state, 2, &count, out);
+  const XrViewStateFlags needed = XR_VIEW_STATE_POSITION_VALID_BIT | XR_VIEW_STATE_ORIENTATION_VALID_BIT;
+  return XR_SUCCEEDED(result) && count == 2 && (state.viewStateFlags & needed) == needed;
+}
+
 void Context::Shutdown() {
+  std::lock_guard<std::mutex> lock(mutex_);
   if (instance_ == XR_NULL_HANDLE) {
     getProcAddr_ = nullptr;
     return;
@@ -344,6 +376,7 @@ void Context::Shutdown() {
   state_ = XR_SESSION_STATE_UNKNOWN;
   running_ = false;
   formats_.clear();
+  eyeWidth_ = eyeHeight_ = 0;
   fn = {};
   getProcAddr_ = nullptr;
 }
