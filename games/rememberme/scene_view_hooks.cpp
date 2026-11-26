@@ -1,5 +1,6 @@
 #include "scene_view_hooks.h"
 
+#include <algorithm>
 #include <atomic>
 #include <cmath>
 #include <cstring>
@@ -44,6 +45,7 @@ struct State {
   uint64_t calls = 0;
   uint64_t stereoFrames = 0;
   bool loggedSbs = false;
+  bool loggedLookAt = false;
 
   EyeOverride eye;
 };
@@ -97,13 +99,27 @@ float* __fastcall HookPerspectiveMatrix(float* out, void* /*edx*/, float halfFov
 void __fastcall HookPovLookAt(void* pov, void* /*edx*/, float lx, float ly, float lz, float tx, float ty, float tz) {
   void* const caller = __builtin_return_address(0);
   g_origPovLookAt(pov, lx, ly, lz, tx, ty, tz);
-  // Only the look-at in CalcSceneView, only during our eye calls: put the head
-  // rotation back (the target is kept, e.g. for depth-of-field focus).
-  if (caller == g_povLookAtReturn && g.eye.active && g.eye.vr && g.eye.haveRotation) {
-    auto* rotation = static_cast<int32_t*>(pov) + kPovRotation;
-    rotation[0] = g.eye.rotation.pitch;
-    rotation[1] = g.eye.rotation.yaw;
-    rotation[2] = g.eye.rotation.roll;
+  // Only the look-at in CalcSceneView, only during our eye calls. The view
+  // matrix is built from (target - location) (0x0040DC60), so move the target
+  // onto the eye's forward axis, at the game's target distance (kept for e.g.
+  // depth-of-field focus), and put the eye rotation back.
+  if (caller != g_povLookAtReturn || !g.eye.active || !g.eye.vr || !g.eye.haveRotation) return;
+  auto* words = static_cast<int32_t*>(pov);
+  auto* floats = static_cast<float*>(pov);
+  words[kPovRotation + 0] = g.eye.rotation.pitch;
+  words[kPovRotation + 1] = g.eye.rotation.yaw;
+  words[kPovRotation + 2] = g.eye.rotation.roll;
+  const float dx = tx - lx, dy = ty - ly, dz = tz - lz;
+  const float distance = std::max(std::sqrt(dx * dx + dy * dy + dz * dz), 100.0f);
+  constexpr float kUnitsToRad = 6.28318530718f / 65536.0f;
+  const float pitch = g.eye.rotation.pitch * kUnitsToRad, yaw = g.eye.rotation.yaw * kUnitsToRad;
+  floats[kPovTarget + 0] = lx + std::cos(pitch) * std::cos(yaw) * distance;
+  floats[kPovTarget + 1] = ly + std::cos(pitch) * std::sin(yaw) * distance;
+  floats[kPovTarget + 2] = lz + std::sin(pitch) * distance;
+  if (!g.loggedLookAt) {
+    g.loggedLookAt = true;
+    VR_LOG_INFO("look-at override active: game target %.0f uu away, eye rotation (%d, %d, %d)", distance,
+                g.eye.rotation.pitch, g.eye.rotation.yaw, g.eye.rotation.roll);
   }
 }
 

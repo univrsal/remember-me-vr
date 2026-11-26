@@ -66,6 +66,7 @@ The engine's `GamePlayers` array is at `GEngine + 0x4EC` (`GEngine` = `*(0x01643
 | `APlayerController::GetPlayerViewPoint` (probably) | `0x006A49F0` | fills view location/rotation in CalcSceneView; **to verify** |
 | `AExamplePlayerCamera::UpdateCameraBehaviour` (C++) | camera vtable `+0x494` | from the `exec` thunk |
 | DNE camera look-at `TPOV::LookAt(FVector loc, FVector target)` | `0x008091C0` | `__thiscall`, `ret 0x18`. Sets POV location/target and **recomputes pitch/yaw toward the target, keeping roll**. Called in CalcSceneView (return address `0x008625E9`) when `PlayerCamera` (vtable `+0x4AC`, via `0x00699360`) provides a target. Also called from 8 DNE camera functions |
+| View matrix from POV (`TPOV` → 4×4) | `0x0040DC60` | builds the view matrix from **(TargetLocation − Location)** (look-at), not from the rotation; roll is applied separately. Overriding only the POV rotation therefore changes roll but not pitch/yaw |
 | PlayerCamera target query | `0x00699360` | `__fastcall(controller)`: `PlayerCamera ? PlayerCamera->vtable[0x4AC]() : 0` |
 | `ULocalPlayer::ULocalPlayer` (constructor) | `0x008698F0` | sets the LocalPlayer vtables; `ViewState = AllocateViewState()` |
 | `AllocateViewState()` | `0x00A22B90` | `new FSceneViewState` (`0x380` bytes, ctor `0x00A1FEE0`); no args, returns the pointer |

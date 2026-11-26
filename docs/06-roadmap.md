@@ -58,7 +58,8 @@ Each milestone reduces the risk of the next one. **Milestone 3 is the go/no-go g
   - Conversions are in `vrcore/ue3_space` with a host unit test (`tools/space-test.sh`, run in CI).
 - [x] First headset test (2026-11-26, Proton): stereo depth correct; smooth enough. Found:
   - **Resolution tied to the window** (recommended 2368×2628 per eye = a 4736×2628 window, larger than the monitor). Fix: stereo frames now come from the game's scene image (scene tap: texture sampled by the first draw into the backbuffer), so resolution = window × `SuperSampleCount`.
-  - **In game only head roll worked.** DNE's camera look-at (`0x008091C0`, called from CalcSceneView when the PlayerCamera has a target) recomputes pitch/yaw toward the target (and made the eyes toe in). Fix: hook it and restore the eye rotation, only for the call from CalcSceneView (return address `0x008625E9`) during our eye calls.
+  - **In game only head roll worked.** When the PlayerCamera has a target, CalcSceneView calls DNE's look-at (`0x008091C0`), and the view matrix is then built from **(target − location)** (`0x0040DC60`), with only roll taken from the rotation (both eyes also toed in toward the target). Restoring the rotation alone wasn't enough (second test: still roll only). Fix: in the look-at hook (CalcSceneView call site only, return address `0x008625E9`, during our eye calls), move the target onto the eye's forward axis at the game's target distance, and restore the rotation.
+  - Second test: resolution via the scene image works (4736×2628 at `SuperSampleCount=2`, window 2368×1314, ~140 fps).
   - **Right-eye puddle reflections** show a flat band (`puddle_red_band_stereo.rdc`); not yet located (see 08).
   - Sensen AR hints follow head roll and are misplaced (they use the game camera; part of the per-eye Sensen work).
 - [ ] Verify the fixes in the headset: head tracking in game, resolution via SuperSampleCount, recenter, frame pacing

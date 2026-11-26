@@ -54,6 +54,10 @@ constexpr uint8_t kPovLookAtPrologue[] = {0x83, 0xEC, 0x18, 0x8B, 0x44, 0x24, 0x
 // Return address of the call in CalcSceneView (0x008625E4 + 5); other callers are left alone.
 constexpr uint32_t kPovLookAtReturnInCalcSceneView = 0x008625E9;
 constexpr uint32_t kPovRotation = 3;  // int32 index of pitch; yaw, roll follow
+// float index of TargetLocation. CalcSceneView builds the view matrix from
+// (TargetLocation - Location) (0x0040DC60), not from the rotation; only roll
+// comes from the rotation.
+constexpr uint32_t kPovTarget = 7;
 
 // AllocateViewState(): `new FSceneViewState` (0x380 bytes, ctor 0x00A1FEE0), as
 // called by the ULocalPlayer constructor (0x008698F0) for LocalPlayer->ViewState.
