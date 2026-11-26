@@ -64,6 +64,12 @@ class Reflection {
   // or "ScriptStruct Core.Object.Vector"), searching super classes too. -1 if missing.
   int32_t PropertyOffset(const std::string& structFullName, const std::string& property) const;
 
+  // Bool property lookup: UE3 packs bools into 32-bit words; `offset` is the
+  // word's offset, `mask` the property's bit (UBoolProperty::BitMask, right
+  // after the UProperty fields). False if missing or not a BoolProperty.
+  bool BoolProperty(const std::string& structFullName, const std::string& property, int32_t& offset,
+                    uint32_t& mask) const;
+
   // Writes every class and script struct with its properties (offset, size,
   // type) and function names. Returns the number of structs, -1 on error.
   int DumpTypes(const wchar_t* path) const;

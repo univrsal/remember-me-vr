@@ -10,7 +10,7 @@ Status as of 2026-11-26. Stereo, depth, head tracking and resolution work (M3 pa
 | B | Character shadow offset horizontally, opposite directions per eye (not under the feet) | both, mirrored | Reproduces in the flat F10 test with `TestFov` when symmetric projection is off. Not yet analysed in a capture |
 | C | Blue/shadow wedge on Nilin; puddle reflection band | right | Probably the same cause as A: no water-reflection issues seen with the fix (2026-11-26, brief flat test). Recheck the wedge on Nilin and puddles in VR |
 | D | Sensen AR hints: left eye only, misplaced, follow head roll | left | **Fixed** (confirmed in game 2026-11-26, flat test): per-eye redraw from the game camera, both views composited (`[Stereo] SensenStereo`), see "Artifact D" below |
-| E | Loading screen shows the level around the tips panel | both | Needs loading detection |
+| E | Loading screen shows the level around the tips panel | both | **Built, untested in game:** mono (flat panel) while `ExamplePlayerController.bOnLoadingScreen` is set (`[VR] FlatLoadingScreens`), see below |
 | F | Monitor mirror has no UI in stereo frames | — | Open |
 | G | Smoke particles cut off, depth fog with a hard mask | right | **Fixed** (confirmed in game 2026-11-26, flat test, f90a807): per-view scene-colour copy sampled the wrong region (below). `[Stereo] FixQuadTextureSize` |
 
@@ -92,6 +92,15 @@ Next: test in the flat F10 test (hints should appear in both halves at the right
 - **Fix (built, untested in game):** `[Stereo] FixQuadTextureSize=1` (`games/rememberme/draw_fixes.cpp`): the same test, but only for draws whose viewport is **exactly the right view's rect** of a stereo frame (rects recorded by `renderer_hooks` at `DownsampleSceneDepth`, which runs before the copies; cleared at Present). Rewrite: `u' = (vp.X + u·vp.W) / texW`, `v' = (vp.Y + v·vp.H) / texH`. `tools/renderdoc/uvrule.py` lists the draws the rule would rewrite: in `quad_texture_bug.rdc` exactly one, the copy (EID 10072). The log prints "viewport-relative UV fix active" on the first fix.
 - That version (3518561) turned F10 into one wide stretched view (`borked_mono.rdc`): the full-screen copies at EIDs 9737/9870 (viewport x=0, w=4736) were rewritten to u = 0.5…1. **`device_state` tracked the viewport only through `SetViewport`, but D3D9's `SetRenderTarget` resets it to the whole new target**, so after a render-target change the "current viewport" was still the right eye's. Fixed: `device_state::CurrentViewport()` reads the device's viewport (`GetViewport`). The `DNEResolution` fix and `sensen_stereo` used the same stale value and now read it too.
 - `draw_fixes` is now the game's draw observer and dispatches to `sensen_stereo` first.
+
+## Artifact E: loading screens (2026-11-26)
+
+During loading the game keeps rendering the level being streamed in, and a white tips panel (UI) covers it on a monitor. In VR the level surrounds the player in stereo and the tips are on the UI panel (`debug/loading_screen.jpg`).
+
+- Signal: **`ExamplePlayerController.bOnLoadingScreen`** (packed bool in the word at +0x6E8, with `bOnMainMenu`, `bSignInFromPressStart`, `bIsTutoOpen`, `bShouldTogglePause`). Alternatives seen in the type dump: `PauseMenu.bLoadingScreenMode` / `SensenMenu.bLoadingScreenMode` (+0x240), `GameEngine.bStartedLoadMapMovie`, `WorldInfo.bRequestedBlockOnAsyncLoading`.
+- `vrcore::ue3::Reflection::BoolProperty` resolves a bool's word offset and bit (`UBoolProperty::BitMask`, the first field after `UProperty`, like `UObjectProperty::PropertyClass` at +0x80).
+- **Built, untested in game:** `[VR] FlatLoadingScreens=1`. The `CalcSceneView` hook reads the flag from `LocalPlayer.Actor` each frame; while set, the frame renders mono (no eye views, no stereo frame), so the compositor shows its flat panel with the game's normal image (tips panel covering the level, as on a monitor), and the F10 test stays mono. The log prints the flag's location at startup and "loading screen on/off" on every change.
+- Next: check in game that the flag follows the loading screens (log), and that nothing else sets it.
 
 ## Artifact B: notes
 

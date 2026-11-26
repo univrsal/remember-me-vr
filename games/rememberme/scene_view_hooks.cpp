@@ -56,6 +56,12 @@ struct State {
 
   EyeOverride eye;
 
+  // Loading screens: render mono while the controller's flag is set.
+  bool flatLoadingScreens = true;
+  int32_t loadingOffset = -1;
+  uint32_t loadingMask = 0;
+  bool wasLoading = false;
+
   // The last per-frame stereo call's left eye, reused (as one view, without a
   // new stereo frame) for calls that build temporary view families.
   bool haveLastLeft = false;
@@ -145,6 +151,17 @@ void __fastcall HookPovLookAt(void* pov, void* /*edx*/, float lx, float ly, floa
   }
 }
 
+bool OnLoadingScreen(void* localPlayer) {
+  if (!g.flatLoadingScreens || g.loadingOffset < 0) return false;
+  uintptr_t controller = 0;
+  uint32_t word = 0;
+  if (!vrcore::mem::Read(reinterpret_cast<uintptr_t>(localPlayer) + kLocalPlayerActor, controller) || !controller ||
+      !vrcore::mem::Read(controller + static_cast<uint32_t>(g.loadingOffset), word)) {
+    return false;
+  }
+  return (word & g.loadingMask) != 0;
+}
+
 void* RightEyeState(void* leftState) {
   switch (g.rightViewState) {
     case RightEyeViewState::Shared:
@@ -202,9 +219,15 @@ void* __fastcall HookCalcSceneView(void* self, void* /*edx*/, void* family, FVec
   void* const viewState = Field<void*>(self, kLocalPlayerViewState);
   const int32_t viewsBefore = ViewCount(family);
 
+  const bool loading = !matricesOnly && OnLoadingScreen(self);
+  if (loading != g.wasLoading) {
+    g.wasLoading = loading;
+    VR_LOG_INFO("loading screen %s: %s", loading ? "on" : "off", loading ? "rendering mono (flat panel in VR)" : "stereo again");
+  }
+
   vrcore::StereoFrame frame;
-  const bool vr = !matricesOnly && g.vrStereo && g.compositor && g.compositor->BeginStereoFrame(frame);
-  const bool sbs = !matricesOnly && !vr && g.sideBySide.load(std::memory_order_relaxed);
+  const bool vr = !matricesOnly && !loading && g.vrStereo && g.compositor && g.compositor->BeginStereoFrame(frame);
+  const bool sbs = !matricesOnly && !loading && !vr && g.sideBySide.load(std::memory_order_relaxed);
 
   void* view;
   void* rightView = nullptr;
@@ -324,6 +347,7 @@ void SceneViewHooks::Configure(const vrcore::Config& config, vrcore::Compositor*
                                             : RightEyeViewState::Own;
   g.logFirstCalls = config.GetInt("Stereo", "LogFirstCalls", g.logFirstCalls);
   g.logEvery = config.GetInt("Stereo", "LogEvery", g.logEvery);
+  g.flatLoadingScreens = config.GetBool("VR", "FlatLoadingScreens", true);
   toggleKey_ = config.GetInt("Stereo", "ToggleKey", 0x79);  // F10
 }
 
@@ -369,6 +393,13 @@ bool SceneViewHooks::Install() {
               : g.rightViewState == RightEyeViewState::Shared ? "shared"
                                                               : "none");
   return ok;
+}
+
+void SceneViewHooks::SetLoadingScreenFlag(int32_t offset, uint32_t mask) {
+  g.loadingOffset = offset;
+  g.loadingMask = mask;
+  VR_LOG_INFO("loading-screen flag at controller +0x%x mask 0x%x%s", offset, mask,
+              g.flatLoadingScreens ? "" : " (FlatLoadingScreens off)");
 }
 
 void SceneViewHooks::ToggleSideBySide() {

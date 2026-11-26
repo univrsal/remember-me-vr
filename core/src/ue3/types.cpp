@@ -157,6 +157,24 @@ int32_t Reflection::PropertyOffset(const std::string& structFullName, const std:
   return -1;
 }
 
+bool Reflection::BoolProperty(const std::string& structFullName, const std::string& property, int32_t& offset,
+                              uint32_t& mask) const {
+  // UObjectProperty::PropertyClass is the first field after UProperty; so is
+  // UBoolProperty::BitMask.
+  if (!TypesValid() || !layout_.propClass) return false;
+  for (uintptr_t s = FindObject(structFullName); s; s = ReadPtr(s + layout_.structSuper)) {
+    for (uintptr_t f = ReadPtr(s + layout_.structChildren); f; f = ReadPtr(f + layout_.fieldNext)) {
+      if (ObjectName(f) != property || ClassName(f) != "BoolProperty") continue;
+      uint32_t m = 0;
+      if (!mem::Read(f + layout_.propClass, m) || m == 0 || (m & (m - 1)) != 0) return false;  // one bit
+      offset = ReadI32(f + layout_.propOffset);
+      mask = m;
+      return offset >= 0;
+    }
+  }
+  return false;
+}
+
 std::string Reflection::PropertyType(uintptr_t property) const {
   const std::string cls = ClassName(property);
   if (cls == "IntProperty") return "int";
