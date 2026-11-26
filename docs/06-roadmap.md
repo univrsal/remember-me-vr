@@ -22,7 +22,10 @@ Each milestone reduces the risk of the next one. **Milestone 3 is the go/no-go g
 - [x] Repo skeleton: CMake + mingw-w64 i686, `dinput8` proxy, logger, INI config, MinHook, deploy script, Wine smoke test. Split into a reusable `core/` and `games/rememberme/` (see the root `README.md`)
 - [x] `Direct3DCreate9` → `CreateDevice` → device/swapchain `Present` and `Reset` hooks (verified under Wine with wined3d and with Proton's DXVK `d3d9.dll`)
 - [x] `QueryInterface(ID3D9VkInteropDevice)`; log the Vulkan handles (verified with DXVK in the smoke test)
-- [ ] Same checks in the real game under Proton (`tools/deploy.sh install`, then read `RememberMeVR.log`)
+- [x] Same checks in the real game under Proton (2026-11-26): all hooks fire, DXVK interop returns Vulkan handles. Findings from the log:
+  - D3D9 calls come from **UE3's render thread**: the device is created on the main thread and presented from another.
+  - Device flags `0x142` (FPU_PRESERVE | HARDWARE_VERTEXPROCESSING | DISABLE_DRIVER_MANAGEMENT), **not** `MULTITHREADED`. DXVK's `LockDevice` is therefore a no-op, so all interop and VR submission must run on the render thread, inside our D3D9 hooks.
+  - Backbuffer 1880×2089, `D3DFMT_X8R8G8B8`, swap effect `COPY`, 1 back buffer. `Direct3DCreate9` is called twice (same object).
 - [ ] OpenXR instance and session on DXVK's device; copy the backbuffer into a quad layer
 - **Exit criteria:** stable for 30+ minutes, no extension or device-lost errors. Answers whether DXVK + wineopenxr interop works in a 32-bit process. If it doesn't, try the OpenVR fallback.
 
@@ -66,7 +69,7 @@ Each milestone reduces the risk of the next one. **Milestone 3 is the go/no-go g
 | Drawing twice triggers game-side effects (HUD script, timers) | Medium | Find them in M2/M3; run them on one eye only |
 | Customised engine differs from known UE3 layouts | Medium | Rely on our own Ghidra, reflection and RenderDoc findings, not other games' SDKs |
 | Scripted cameras and cutscenes are uncomfortable | High | Comfort toggles; cutscene theatre mode |
-| Game update changes code | Low–Medium | Byte-pattern checks on every RVA; log the build (`changelist 940782`, PE timestamp `0x69d8a355`) |
+| Game update changes code | Low–Medium | Byte-pattern checks on every RVA; log the build (`changelist 940782`, PE file-header timestamp `0x69d8a358`) |
 
 ## Open questions
 

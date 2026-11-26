@@ -29,7 +29,7 @@ The game project is still called `ExampleGame` internally, and DONTNOD's engine 
 | `.rdata` entropy | 5.2 | Strings are readable without unpacking |
 | MSVC RTTI | none found | No class names from RTTI. Rely on UE3 reflection instead. |
 
-The PE timestamp (2026-04-10) suggests a fairly recent rebuild or repackage by the publisher. Signatures and offsets may change if Steam updates the game again, so prefer pattern scanning to hard-coded offsets.
+The PE file-header timestamp `0x69d8a358` (2026-04-10) identifies the build; the mod checks it at startup. (The debug directory carries a slightly different stamp, `0x69d8a355`; don't confuse the two.) The date suggests a fairly recent rebuild or repackage by the publisher. Signatures and offsets may change if Steam updates the game again, so prefer pattern scanning to hard-coded offsets.
 
 ### Imports of interest
 

@@ -39,6 +39,7 @@ done
 for f in ${PACKAGE_DOCS:-}; do
   cp "$game_dir/$f" "$stage/"
 done
+cp "$repo/LICENSE" "$stage/LICENSE.txt"
 echo "$version" > "$stage/VERSION.txt"
 
 mkdir -p "$repo/dist"

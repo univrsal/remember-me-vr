@@ -7,9 +7,9 @@
 
 namespace {
 
-// PE timestamp of the Steam build the analysis in docs/ was done on
+// PE file-header timestamp (IMAGE_FILE_HEADER::TimeDateStamp) of the Steam build the analysis in docs/ was done on
 // (changelist 940782). See docs/01-game-analysis.md.
-constexpr uint32_t kKnownTimestamp = 0x69d8a355;
+constexpr uint32_t kKnownTimestamp = 0x69d8a358;
 
 class RememberMe final : public vrcore::Game {
  public:

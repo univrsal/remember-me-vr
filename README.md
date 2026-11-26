@@ -100,6 +100,10 @@ That creates a GitHub pre-release named after the tag, with the zip attached and
 
 `Game::OnDeviceCreated` is the first safe point to hook game code. On SteamStub-protected executables, `.text` is still encrypted while `DllMain` runs.
 
+## License
+
+zlib; see [LICENSE](LICENSE). Game files and anything derived from the game binary (`re/`, captures) are not part of this repository.
+
 ## Third-party code
 
 - [MinHook](https://github.com/TsudaKageyu/minhook): BSD 2-clause (fetched at build time)
