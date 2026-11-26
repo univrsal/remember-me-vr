@@ -2,6 +2,7 @@
 
 #include <cinttypes>
 
+#include "scene_view_hooks.h"
 #include "vrcore/game.h"
 #include "vrcore/log.h"
 #include "vrcore/process.h"
@@ -33,6 +34,8 @@ class RememberMe final : public vrcore::Game {
     ue3Discover_ = config.GetBool("UE3", "Discover", true);
     ue3DumpOnStart_ = config.GetBool("UE3", "DumpObjectsOnStart", true);
     ue3DumpKey_ = config.GetInt("UE3", "DumpObjectsKey", 0x78);  // F9
+    engineHooks_ = config.GetBool("Stereo", "EngineHooks", true);
+    sceneViews_.Configure(config);
     VR_LOG_INFO("VR %s: virtual screen %.1f m wide at %.1f m, recenter key 0x%02x", vrEnabled_ ? "on" : "off",
                 screen.width, screen.distance, screen.recenterKey);
   }
@@ -44,6 +47,14 @@ class RememberMe final : public vrcore::Game {
                 dxvk ? "DXVK interop available" : "no DXVK interop");
     if (!dxvk) VR_LOG_WARN("VR output needs DXVK's d3d9.dll (Proton's default, or dxvk next to the exe on Windows)");
     // The exe is unpacked and the engine initialised by now: map UE3's reflection.
+    // Hard-coded engine addresses: only on the build they were found in.
+    if (engineHooks_ && !engineHooksInstalled_) {
+      if (knownBuild_) {
+        engineHooksInstalled_ = sceneViews_.Install();
+      } else {
+        VR_LOG_WARN("engine hooks skipped: unknown game build");
+      }
+    }
     if (ue3Discover_ && !reflection_.Valid() && reflection_.Discover()) {
       reflection_.DiscoverTypes();
       if (ue3DumpOnStart_) DumpObjects("start");
@@ -57,6 +68,11 @@ class RememberMe final : public vrcore::Game {
       const bool down = (GetAsyncKeyState(ue3DumpKey_) & 0x8000) != 0;
       if (down && !dumpKeyDown_ && reflection_.Valid()) DumpObjects("hotkey");
       dumpKeyDown_ = down;
+    }
+    if (engineHooksInstalled_ && sceneViews_.ToggleKey()) {
+      const bool down = (GetAsyncKeyState(sceneViews_.ToggleKey()) & 0x8000) != 0;
+      if (down && !sbsKeyDown_) sceneViews_.ToggleSideBySide();
+      sbsKeyDown_ = down;
     }
     if (vrEnabled_) screen_.OnPresent(device);
     ++frames_;
@@ -85,6 +101,10 @@ class RememberMe final : public vrcore::Game {
   int ue3DumpKey_ = 0;
   bool dumpKeyDown_ = false;
   vrcore::ue3::Reflection reflection_;
+  bool engineHooks_ = true;
+  bool engineHooksInstalled_ = false;
+  bool sbsKeyDown_ = false;
+  rm::SceneViewHooks sceneViews_;
   bool vrEnabled_ = true;
   vrcore::VirtualScreen screen_;
   int presentLogInterval_ = 0;

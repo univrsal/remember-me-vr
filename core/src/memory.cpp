@@ -54,6 +54,11 @@ bool ReadCString(uintptr_t address, std::string& out, size_t max) {
   return false;
 }
 
+bool Matches(uintptr_t address, const uint8_t* expected, size_t size) {
+  if (!IsReadable(reinterpret_cast<const void*>(address), size)) return false;
+  return std::memcmp(reinterpret_cast<const void*>(address), expected, size) == 0;
+}
+
 std::vector<Section> ExeSections() {
   std::vector<Section> out;
   auto* base = reinterpret_cast<const char*>(Exe().base);

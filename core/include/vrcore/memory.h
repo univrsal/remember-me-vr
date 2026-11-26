@@ -22,6 +22,10 @@ bool Read(uintptr_t address, T& out) {
 // Reads a NUL-terminated printable ASCII string of at most `max` chars.
 bool ReadCString(uintptr_t address, std::string& out, size_t max = 256);
 
+// True if the bytes at `address` equal `expected` (e.g. a function prologue
+// checked before hooking a hard-coded address).
+bool Matches(uintptr_t address, const uint8_t* expected, size_t size);
+
 struct Section {
   char name[9];
   uintptr_t start;  // live address
