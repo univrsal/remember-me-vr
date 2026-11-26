@@ -8,7 +8,8 @@ Each milestone reduces the risk of the next one. **Milestone 3 is the go/no-go g
 - [x] RenderDoc capture taken and analysed (see 07)
 - [x] Exe unpacked with Steamless (Variant 3.1, local only in `re/`)
 - [x] Native function `{name, fn}` tables confirmed in the unpacked exe
-- [ ] Mono fps baseline with `SuperSampleCount=1` at eye-like resolution (e.g. 2016×2240 windowed), using `DXVK_HUD=fps,frametimes`
+- [x] Mono fps baseline: ~180 fps at 1880×2090, `SuperSampleCount=1` (window clamped by monitor size; see 05 for resolution setup and 07 for the stereo estimate)
+- [ ] Check whether the baseline is GPU-bound (`DXVK_HUD=gpuload`), and measure a heavier scene
 - [ ] Captures with the HUD visible, the pause menu, and a cutscene (see 07)
 - [ ] Check whether the `~` console works in this shipping build
 - [ ] Import the unpacked exe into Ghidra; label the native tables with a script

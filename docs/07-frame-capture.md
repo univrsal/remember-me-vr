@@ -43,7 +43,16 @@ No Scaleform/GFx HUD draws are visible in this frame. Either the HUD was hidden 
 ## What this means for stereo
 
 1. **CPU cost is small.** 857 draws per frame; doubling that is no problem for the render thread.
-2. **GPU cost:** the game already runs at 3.7 MP (2560×1440) with supersampling on. Two eyes at ~2000×2200 is ~8.8 MP, about 2.4× the current pixel work, for a 2013 forward renderer on an RX 6700 XT. Mono fps should be measured with `SuperSampleCount=1` to set a baseline.
+2. **GPU cost.** Measured mono baseline (2026-11-26): **~180 fps at 1880×2090** (3.9 MP), `SuperSampleCount=1`, windowed, RX 6700 XT, one gameplay scene. That's ≈5.6 ms per eye-sized frame. Rough estimate for S1 (whole frame drawn twice, scaling linearly with frame cost):
+
+   | Per-eye resolution | Two-eye frame time | ≈ fps |
+   |---|---|---|
+   | 1880×2090 (measured size) | ~11.1 ms | ~90 |
+   | 2016×2240 | ~12.8 ms | ~78 |
+
+   So 72/80 Hz looks comfortably reachable. 90 Hz is borderline at full resolution and will need a slightly lower eye resolution, cheaper DNE effects, or S2, which shares shadows and the cubemap between eyes.
+   - This is one scene. Heavier areas (Neo-Paris exteriors, combat with many effects) need checking.
+   - It isn't known whether the 180 fps run was GPU-bound. Check with `DXVK_HUD=gpuload`.
 3. **Work that could be shared between eyes:** the cubemap blend (passes 0–42) and the 2048² shadow depths (if they're spot/per-light shadows, not view-fitted cascades). If both eyes are rendered as two views in one view family, UE3 does each of these once. If we render the whole viewport twice, they're done twice.
 4. **Per-view temporal state:** eye adaptation (pass 72), and probably occlusion queries (`vkCmdBeginQuery` ×135 in the frame). Each eye needs its own `FSceneViewState`, or eye adaptation and occlusion results will leak between eyes.
 5. **Downsample point:** pass 87 → 92 is where the full-res, post-processed image becomes the backbuffer. With `SuperSampleCount=1` and the window set to the eye resolution, the backbuffer *is* the eye image. That's the simplest point to capture it.

@@ -30,6 +30,31 @@ Headers and libs to vendor (git submodules or FetchContent):
 - Use a deploy script that copies the built DLL into `Remember Me/Binaries/Win32/` (via the symlink). Gitignore the game folder; it already is.
 - SteamVR must be running before the game starts so the OpenXR/OpenVR bridges find it.
 
+## Setting the resolution
+
+**Launch options don't work for this.** The exe still contains UE3's standard command-line parsing (`-ResX=`, `-ResY=`, `-windowed`). But after startup, DONTNOD's port reads `ExampleAdriftGfxConfig.ini` and issues its own `SETRES <w>x<h>` console command from it. That overrides whatever the command line set. (Format strings `SETRES %dx%d` / `SETRES %dx%d@%d` sit next to the config keys in the exe.)
+
+Edit the config instead:
+`pfx/drive_c/users/steamuser/Documents/My Games/UnrealEngine3/RememberMeGame/Config/ExampleAdriftGfxConfig.ini`
+
+```ini
+[Rendering]
+ResWinWidth=2016      ; used when Fullscreen=false
+ResWinHeight=2240
+ResWidth=1920         ; used when Fullscreen=true
+ResHeight=1080
+SuperSampleCount=1    ; 2 = render at 2x width and 2x height, then downsample
+Fullscreen=false
+VSync=false
+```
+
+Notes:
+
+- **The physical screen limits the window size.** A requested 2016×2240 window came out at **1880×2090**, clamped to the monitor. To reach a larger render size, use a smaller window with `SuperSampleCount=2` (e.g. 1008×1120 → 2016×2240 scene). Once the mod runs, the window size no longer matters: we set the eye render size ourselves.
+- **The in-game graphics menu may rewrite this file.** Check it after changing settings in game.
+- **Untested: `GFXINI=` / `DEFGFXINI=`.** The exe also recognises these switches. They probably select an alternative graphics config, which would allow per-profile launch options (e.g. `%command% -GFXINI=VRBaseline.ini`). The path semantics (absolute, or relative to the config folder) are unknown.
+- `DXVK_HUD=fps,frametimes,gpuload` in launch options shows the actual backbuffer size and whether a run is GPU-bound.
+
 ## Reverse engineering and debugging on Linux
 
 | Task | Tool | Linux? |
