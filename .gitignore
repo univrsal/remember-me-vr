@@ -1,5 +1,6 @@
 # Game install (symlink) — never commit game files
 Remember Me
+debug/
 
 # Reverse-engineering artefacts derived from the game binary (local only, never distribute)
 re/
