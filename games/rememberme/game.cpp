@@ -3,6 +3,7 @@
 #include <cinttypes>
 
 #include "device_state_hooks.h"
+#include "draw_fixes.h"
 #include "renderer_hooks.h"
 #include "scene_view_hooks.h"
 #include "sensen_stereo.h"
@@ -53,6 +54,7 @@ class RememberMe final : public vrcore::Game {
     sceneViews_.Configure(config, vrEnabled_ ? &compositor_ : nullptr);
     rm::renderer_hooks::Configure(config);
     rm::sensen_stereo::Configure(config);
+    rm::draw_fixes::Configure(config);
     deviceState_.fixDneResolution = config.GetBool("Stereo", "FixDNEResolution", true);
     VR_LOG_INFO("VR %s: mode %s, screen fallback %.1f m wide at %.1f m, recenter key 0x%02x",
                 vrEnabled_ ? "on" : "off", vr.mode == vrcore::Compositor::Mode::Stereo ? "stereo" : "screen",
@@ -77,6 +79,7 @@ class RememberMe final : public vrcore::Game {
           rm::device_state::Install(device, deviceState_);
           rm::renderer_hooks::Install();
           rm::sensen_stereo::Install();
+          rm::draw_fixes::Install();
         }
       } else {
         VR_LOG_WARN("engine hooks skipped: unknown game build");

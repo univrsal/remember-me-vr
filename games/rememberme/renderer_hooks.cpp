@@ -15,9 +15,6 @@ namespace rm::renderer_hooks {
 namespace {
 
 DownsampleSceneDepthFn g_origDownsample = nullptr;
-DrawDenormalizedQuadFn g_origDrawDenormalizedQuad = nullptr;
-bool g_fixQuadTextureSize = true;
-uint64_t g_quadFixes = 0;
 
 int g_logCalls = 0;               // from the config; 0 = off
 std::atomic<int> g_remaining{0};  // stereo calls still to log
@@ -63,43 +60,9 @@ void __fastcall HookDownsample(void* renderer, void* /*edx*/) {
   VR_LOG_INFO("DownsampleSceneDepth #%llu end", static_cast<unsigned long long>(g_logged));
 }
 
-// Some quads (e.g. the per-view scene-colour copy before translucency, which
-// soft particles and fog read depth from) pass view-relative U/V and the
-// viewport's size as the texture size, although the texture is the whole
-// scene buffer. In mono the view covers the buffer, so it works; for a stereo
-// view it samples the wrong part of the buffer (stretched from x = 0). If the
-// texture size given equals the viewport size, the viewport doesn't start at
-// 0,0 horizontally or is narrower than the bound texture (a stereo view):
-// add the viewport offset to U/V and use the texture's real size.
-void HookDrawDenormalizedQuad(float x, float y, float sizeX, float sizeY, float u, float v, float sizeU, float sizeV,
-                              uint32_t targetSizeX, uint32_t targetSizeY, uint32_t textureSizeX,
-                              uint32_t textureSizeY, float z) {
-  if (g_fixQuadTextureSize) {
-    const D3DVIEWPORT9& vp = device_state::CurrentViewport();
-    UINT texW = 0, texH = 0;
-    if (textureSizeX == vp.Width && textureSizeY == vp.Height && targetSizeX == vp.Width &&
-        targetSizeY == vp.Height && device_state::Stage0TextureSize(texW, texH) &&
-        (vp.X > 0 || vp.Width < texW) && vp.X + vp.Width <= texW && vp.Y + vp.Height <= texH) {
-      if (g_quadFixes++ == 0) {
-        VR_LOG_INFO("quad texture-size fix active: U/V %+.0f,%+.0f, texture %ux%u -> %ux%u (viewport %lu,%lu %lux%lu, "
-                    "caller %p)",
-                    static_cast<float>(vp.X), static_cast<float>(vp.Y), textureSizeX, textureSizeY, texW, texH, vp.X,
-                    vp.Y, vp.Width, vp.Height, __builtin_return_address(0));
-      }
-      u += static_cast<float>(vp.X);
-      v += static_cast<float>(vp.Y);
-      textureSizeX = texW;
-      textureSizeY = texH;
-    }
-  }
-  g_origDrawDenormalizedQuad(x, y, sizeX, sizeY, u, v, sizeU, sizeV, targetSizeX, targetSizeY, textureSizeX,
-                             textureSizeY, z);
-}
-
 }  // namespace
 
 void Configure(const vrcore::Config& config) {
-  g_fixQuadTextureSize = config.GetBool("Stereo", "FixQuadTextureSize", true);
   g_logCalls = config.GetInt("Debug", "DepthDownsampleLog", 0);
   g_remaining = g_logCalls;
 }
@@ -107,20 +70,6 @@ void Configure(const vrcore::Config& config) {
 bool DiagnosticEnabled() { return g_logCalls > 0; }
 
 void Install() {
-  if (g_fixQuadTextureSize && !g_origDrawDenormalizedQuad) {
-    auto* quad = vrcore::Exe().FromPreferredVA<uint8_t>(kDrawDenormalizedQuad);
-    if (vrcore::mem::Matches(reinterpret_cast<uintptr_t>(quad), kDrawDenormalizedQuadPrologueA,
-                             sizeof(kDrawDenormalizedQuadPrologueA)) &&
-        vrcore::mem::Matches(reinterpret_cast<uintptr_t>(quad) + kDrawDenormalizedQuadPrologueBOffset,
-                             kDrawDenormalizedQuadPrologueB, sizeof(kDrawDenormalizedQuadPrologueB))) {
-      const bool ok = vrcore::hook::Install("DrawDenormalizedQuad", reinterpret_cast<void*>(quad),
-                                            reinterpret_cast<void*>(&HookDrawDenormalizedQuad),
-                                            reinterpret_cast<void**>(&g_origDrawDenormalizedQuad));
-      VR_LOG_INFO("quad texture-size fix %s", ok ? "installed" : "FAILED");
-    } else {
-      VR_LOG_ERROR("renderer hooks: DrawDenormalizedQuad prologue doesn't match this build");
-    }
-  }
   if (g_origDownsample || (g_logCalls <= 0 && !sensen_stereo::Enabled())) return;
   auto* fn = vrcore::Exe().FromPreferredVA<uint8_t>(kDownsampleSceneDepth);
   if (!vrcore::mem::Matches(reinterpret_cast<uintptr_t>(fn), kDownsampleSceneDepthPrologueA,

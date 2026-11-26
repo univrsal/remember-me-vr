@@ -1,6 +1,9 @@
 #pragma once
 
+#include <d3d9.h>
+
 #include "vrcore/config.h"
+#include "vrcore/scene_tap.h"
 
 namespace rm::sensen_stereo {
 
@@ -22,8 +25,13 @@ namespace rm::sensen_stereo {
 void Configure(const vrcore::Config& config);
 bool Enabled();
 
-// Registers the draw observer (needs device_state and scene_tap installed).
+// Enables the redraw (needs device_state and scene_tap installed; draws come
+// through draw_fixes' observer).
 void Install();
+
+// Render thread, before each non-UI draw (from draw_fixes). True if the draw
+// was handled (the game's draw is skipped).
+bool OnDraw(IDirect3DDevice9* device, const vrcore::scene_tap::DrawCall& call);
 
 // Game thread, per stereo frame: the game camera's view and projection
 // (CalcSceneView in matrices-only mode), keyed by that frame's left-eye

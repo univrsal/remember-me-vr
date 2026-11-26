@@ -260,7 +260,7 @@ bool CompositeBothViews(IDirect3DDevice9* device, const DrawCall& call) {
   return true;
 }
 
-bool OnDraw(IDirect3DDevice9* device, const DrawCall& call) {
+bool HandleDraw(IDirect3DDevice9* device, const DrawCall& call) {
   if (!g_stereo) return false;
   const int transform = device_state::VertexShaderConstant("Transform");
   if (transform >= 0) {
@@ -317,10 +317,11 @@ void Install() {
     VR_LOG_WARN("sensen stereo needs [VR] StereoSource=scene (the draw hooks); off");
     return;
   }
-  vrcore::scene_tap::SetDrawObserver(&OnDraw);
   g_installed = true;
   VR_LOG_INFO("sensen stereo: on");
 }
+
+bool OnDraw(IDirect3DDevice9* device, const DrawCall& call) { return g_installed && HandleDraw(device, call); }
 
 void PushGameCamera(const float leftEyeView[16], const float gameView[16], const float gameProj[16]) {
   if (!g_installed) return;
