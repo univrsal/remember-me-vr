@@ -49,7 +49,7 @@ Verified **not** the cause:
 - The projection: bands are present with `SymmetricProjection` on and off.
 - The game, unmodified: no bands. Stereo off (F10): gone. Left view in stereo: clean.
 
-Remaining suspect: **the pixel-shader constants of the right-eye draw** (the two draws use different constant buffers, 64 bytes apart; their contents aren't in the capture). `ProjectionScaleBias` and `MinZ_MaxZRatio` come from the view's projection matrix in UE3, so a right-eye matrix with unexpected terms would convert depth wrongly in that eye only. `SourceTexelOffsets*` come from buffer sizes (shared). Not proven.
+~~Remaining suspect: the pixel-shader constants of the right-eye draw~~ **ruled out 2026-11-26** (see "Per-eye constants: result" below). Original reasoning: **the pixel-shader constants of the right-eye draw** (the two draws use different constant buffers, 64 bytes apart; their contents aren't in the capture). `ProjectionScaleBias` and `MinZ_MaxZRatio` come from the view's projection matrix in UE3, so a right-eye matrix with unexpected terms would convert depth wrongly in that eye only. `SourceTexelOffsets*` come from buffer sizes (shared). Not proven.
 
 ### Where the code is (Ghidra, `0x00400000` base)
 
@@ -61,10 +61,29 @@ Remaining suspect: **the pixel-shader constants of the right-eye draw** (the two
   - Viewport: `View+0x40..0x4C` (X, Y, SizeX, SizeY) / factor; quad via `FUN_00A35FC0` (DrawDenormalizedQuad).
 - **Diagnostic:** `[Debug] DepthDownsampleLog=N` (`games/rememberme/depth_downsample_diag.cpp`) hooks `FUN_00A60D30` and logs, for the next N two-view calls, each view's rect, projection rows and `+0x53C`, then every `SetPixelShaderConstantF`/`SetSamplerState`/`SetTexture`/`SetViewport`/`SetPixelShader` inside the pass. F10 re-arms it. The UE3 RHI may skip redundant state sets, so a state that appears only between the two `SetViewport` lines differs between the eyes.
 
+### Per-eye constants: result (2026-11-26)
+
+`DepthDownsampleLog=3`, flat F10 test, `TestFov=-57.0,46.5,54.7,-54.6` with `SymmetricProjection=1`: 23 stereo calls logged, all consistent. **Both eyes get correct inputs:**
+
+| D3D9 reg | Parameter | Left | Right |
+|---|---|---|---|
+| c0 | ProjectionScaleBias | (0.999, −9.99) | identical |
+| c2 | MinZ_MaxZRatio | (9.99, 0.000999987, −0.1001001, −0.1) | identical |
+| c7, c8 | SourceTexelOffsets01/23 | (0, 0, 1/2368, 0), (0, 1/1316, 1/2368, 1/1316) | identical |
+| c1 | ScreenPositionScaleBias | (0.25, −0.49924, 0.49943, **0.25011**) | (…, **0.75011**): correct for x=2368 |
+| c6 | camera position | eye | 6.4 uu away (= `EyeSeparation`) |
+| s0 | scene colour | 4736×2632 `A16B16G16R16F`, point, clamp | identical |
+
+Viewports: (0,0,1184,1314) then (1184,0,1184,1314). `View+0x53C` is 0 in every view, so the alternate sampler isn't used. The projection rows confirm the matrix at `View+0xA0` (here the symmetric 57°/54.7° frustum). So the depth conversion is the same in both eyes; the push-data difference in `debug/` isn't a constant or sampler difference at the D3D9 level.
+
+What's left is the **data** the right-eye draw reads or the **state** it writes with (depth/stencil test, not logged):
+- the right half of the scene colour's alpha (scene depth) could already carry the bands, below the 0–0.026 range checked visually;
+- the draw's depth/stencil test could reject rows in the right half, leaving stale/cleared values.
+
 ### Next steps
 
-1. ~~Find the `SetParameters` function~~ (inlined in `FUN_00A60D30`, above). Run the flat test (`TestFov` on) with `[Debug] DepthDownsampleLog=3`, press F10 in a banded spot, and compare the two eyes' constants (c0..c3 and the base parameters), samplers and `+0x53C` in the log.
-2. If the right eye's `ProjectionScaleBias`/`MinZ_MaxZRatio` are wrong: find which view/matrix the game reads (e.g. View[0] instead of the eye's own, or terms our `FPerspectiveMatrix` hook perturbs: it rewrites m[0], m[5], m[8], m[9]) and patch it in the hook.
+1. ~~Find `SetParameters` and compare the per-eye constants~~: done, identical/correct (above).
+2. In `lighting_band_artifact.rdc`, pass 61: **Pixel History** on a banded pixel in the right half of Image 891 (and a clean neighbour). It shows whether the downsample draw wrote it, whether the depth/stencil test rejected it, and the shader output. If the draw writes the bad value, debug that pixel's shader and read the four scene-colour alpha samples; if they're already banded, follow the scene colour's alpha back to the pass that writes it for the right view. If the test rejects it, compare the pass's depth/stencil state and the depth target's contents (Image 870) between the halves.
 3. Once A is understood, re-check C (wedge, puddle band) against the same pass.
 
 ## Artifact B: notes
