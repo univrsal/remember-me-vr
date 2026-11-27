@@ -25,7 +25,7 @@ Keys and all other options are in `RememberMeVR.ini`; see [configuration](meta/d
 
 1. Extract the release zip into the game's install folder (it puts `dinput8.dll` and `RememberMeVR.ini` in `Binaries/Win32`).
 2. Start SteamVR (or another OpenXR runtime) **before** the game.
-3. Linux/Proton also needs a launch option and a one-time OpenXR manifest; Windows needs DXVK's 32-bit `d3d9.dll`.
+3. **Windows** needs [DXVK](https://github.com/doitsujin/dxvk/releases)'s 32-bit `d3d9.dll`. **Linux/Proton** also needs a launch option and a one-time OpenXR manifest; 
 
 Details: [Linux / Proton](meta/docs/installing-linux.md) / [Windows](meta/docs/installing-windows.md)
 
