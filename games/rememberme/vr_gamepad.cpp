@@ -32,6 +32,9 @@ bool g_loggedConnected = false;
 
 std::mutex g_mutex;  // XInput may be polled from more than one thread
 uint64_t g_nextDiagMs = 0;
+int32_t g_usingGamepadOffset = -1;
+uint32_t g_usingGamepadMask = 0;
+bool g_loggedUsingGamepad = false;
 std::string g_lastDiag;
 
 template <typename T>
@@ -71,6 +74,29 @@ std::string PlayerInputSticks() {
   std::snprintf(buf, sizeof(buf), "raw L %.2f,%.2f R %.2f,%.2f / joy L %.2f,%.2f R %.2f,%.2f / gameplay L %.2f,%.2f R %.2f,%.2f",
                 v[1], v[0], v[3], v[2], v[5], v[4], v[7], v[6], v[9], v[8], v[11], v[10]);
   return buf;
+}
+
+// The game ignores gamepad sticks until PlayerInput.bUsingGamepad is set,
+// which only a real gamepad does: set it while a VR stick is pushed.
+void MarkUsingGamepad(const XINPUT_GAMEPAD& pad) {
+  if (g_usingGamepadOffset < 0 || !g_usingGamepadMask) return;
+  constexpr int kPushed = 8000;  // ~25% deflection
+  if (std::abs(pad.sThumbLX) < kPushed && std::abs(pad.sThumbLY) < kPushed && std::abs(pad.sThumbRX) < kPushed &&
+      std::abs(pad.sThumbRY) < kPushed) {
+    return;
+  }
+  const uintptr_t pi = PlayerInput0();
+  if (!pi) return;
+  const uintptr_t word = pi + static_cast<uintptr_t>(g_usingGamepadOffset);
+  const uint32_t flags = ReadAt<uint32_t>(word);
+  if (flags & g_usingGamepadMask) return;
+  if (!vrcore::mem::IsReadable(reinterpret_cast<const void*>(word), 4)) return;
+  // Game thread (XInput is polled from UWindowsClient::Tick), plain field.
+  *reinterpret_cast<volatile uint32_t*>(word) = flags | g_usingGamepadMask;
+  if (!g_loggedUsingGamepad) {
+    g_loggedUsingGamepad = true;
+    VR_LOG_INFO("vr gamepad: VR stick pushed, set PlayerInput.bUsingGamepad (sticks are ignored without it)");
+  }
 }
 
 // Diagnostics (sticks ignored without a real gamepad): the game's joystick
@@ -218,6 +244,7 @@ DWORD WINAPI HookGetState(DWORD user, XINPUT_STATE* state) {
                 result == ERROR_SUCCESS ? state->Gamepad.sThumbLX : 0, result == ERROR_SUCCESS ? state->Gamepad.sThumbLY : 0,
                 result == ERROR_SUCCESS ? state->Gamepad.sThumbRX : 0, result == ERROR_SUCCESS ? state->Gamepad.sThumbRY : 0);
   }
+  MarkUsingGamepad(pad);
   state->dwPacketNumber = g_packet;
   state->Gamepad = pad;
   if (!g_loggedUse) {
@@ -239,6 +266,12 @@ DWORD WINAPI HookSetState(DWORD user, XINPUT_VIBRATION* vibration) {
 }
 
 }  // namespace
+
+void SetUsingGamepadFlag(int32_t offset, uint32_t mask) {
+  g_usingGamepadOffset = offset;
+  g_usingGamepadMask = mask;
+  VR_LOG_INFO("vr gamepad: PlayerInput.bUsingGamepad at +0x%X mask 0x%X", offset, mask);
+}
 
 void Configure(const vrcore::Config& config, vrcore::Compositor* compositor) {
   g_compositor = compositor;

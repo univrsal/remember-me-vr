@@ -117,6 +117,15 @@ class RememberMe final : public vrcore::Game {
           }
         }
       }
+      {
+        int32_t offset = -1;
+        uint32_t mask = 0;
+        if (reflection_.BoolProperty("Class Engine.PlayerInput", "bUsingGamepad", offset, mask)) {
+          rm::vr_gamepad::SetUsingGamepadFlag(offset, mask);
+        } else {
+          VR_LOG_WARN("PlayerInput.bUsingGamepad not found; VR sticks need a real gamepad to be used first");
+        }
+      }
       if (ue3DumpOnStart_) DumpObjects("start");
     }
   }
