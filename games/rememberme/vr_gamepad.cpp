@@ -10,6 +10,7 @@
 #include <cstring>
 #include <mutex>
 
+#include "free_cam.h"
 #include "vrcore/hook.h"
 #include "vrcore/log.h"
 #include "vrcore/memory.h"
@@ -155,32 +156,27 @@ void Merge(XINPUT_GAMEPAD& vr, const XINPUT_GAMEPAD& real) {
   }
 }
 
-DWORD WINAPI HookGetState(DWORD user, XINPUT_STATE* state) {
-  if (user == 0 && g_compositor) RegisterVirtualPad();
-  const DWORD result = g_origGetState(user, state);
-  if (!g_enabled || user != 0 || !state || !g_compositor) return result;
+bool VrActive() { return g_enabled && g_compositor; }
+
+// Player 0's state as the VR controllers and a real pad give it (caller holds
+// g_mutex). `result`/`state`: the real XInputGetState's. Returns the result
+// the game should get.
+DWORD Compose(DWORD result, XINPUT_STATE* state) {
+  if (!VrActive()) return result;
   const vrcore::xr::ControllerState controllers = g_compositor->Controllers();
   if (!controllers.active) {
     if (result == ERROR_SUCCESS) return result;  // a real gamepad: as is
     // Report player 0 as connected from the start (the VR controllers only
     // become active once the OpenXR session is focused): neutral state.
-    std::lock_guard<std::mutex> lock(g_mutex);
     std::memset(state, 0, sizeof(*state));
-    state->dwPacketNumber = g_packet;
     if (!g_loggedConnected) {
       g_loggedConnected = true;
       VR_LOG_INFO("vr gamepad: reporting player 0 as a connected gamepad (VR controllers not active yet)");
     }
     return ERROR_SUCCESS;
   }
-  std::lock_guard<std::mutex> lock(g_mutex);
   XINPUT_GAMEPAD pad = FromControllers(controllers);
   if (result == ERROR_SUCCESS) Merge(pad, state->Gamepad);
-  if (std::memcmp(&pad, &g_last, sizeof(pad)) != 0) {
-    g_last = pad;
-    ++g_packet;
-  }
-  state->dwPacketNumber = g_packet;
   state->Gamepad = pad;
   if (!g_loggedUse) {
     g_loggedUse = true;
@@ -188,6 +184,24 @@ DWORD WINAPI HookGetState(DWORD user, XINPUT_STATE* state) {
                 result == ERROR_SUCCESS ? " (merged with a connected gamepad)" : "");
   }
   return ERROR_SUCCESS;
+}
+
+DWORD WINAPI HookGetState(DWORD user, XINPUT_STATE* state) {
+  if (user == 0 && VrActive()) RegisterVirtualPad();
+  DWORD result = g_origGetState(user, state);
+  if (user != 0 || !state) return result;
+  std::lock_guard<std::mutex> lock(g_mutex);
+  result = Compose(result, state);
+  if (result != ERROR_SUCCESS) return result;
+  // Free camera: the game gets a neutral pad (its sticks fly the camera).
+  if (rm::free_cam::SwallowPad(state->Gamepad)) state->Gamepad = XINPUT_GAMEPAD{};
+  // Own packet numbers: they change whenever what the game sees changes.
+  if (std::memcmp(&state->Gamepad, &g_last, sizeof(g_last)) != 0) {
+    g_last = state->Gamepad;
+    ++g_packet;
+  }
+  state->dwPacketNumber = g_packet;
+  return result;
 }
 
 DWORD WINAPI HookSetState(DWORD user, XINPUT_VIBRATION* vibration) {
@@ -208,13 +222,25 @@ void Configure(const vrcore::Config& config, vrcore::Compositor* compositor) {
   g_gripThreshold = config.GetFloat("Input", "GripThreshold", g_gripThreshold);
 }
 
+bool ReadPad(XINPUT_GAMEPAD& pad) {
+  if (!g_origGetState) return false;
+  XINPUT_STATE state{};
+  DWORD result = g_origGetState(0, &state);
+  std::lock_guard<std::mutex> lock(g_mutex);
+  result = Compose(result, &state);
+  if (result != ERROR_SUCCESS) return false;
+  pad = state.Gamepad;
+  return true;
+}
+
 void Install(bool early) {
-  if (!g_enabled || !g_compositor || g_origGetState) return;
+  // Also without VR: the free camera reads the pad and hides it from the game.
+  if ((!VrActive() && !rm::free_cam::Enabled()) || g_origGetState) return;
   HMODULE xinput = GetModuleHandleW(L"xinput1_3.dll");
   if (!xinput && early) return;  // DllMain: no LoadLibrary; try again later
   if (!xinput) xinput = LoadLibraryW(L"xinput1_3.dll");
   if (!xinput) {
-    VR_LOG_WARN("vr gamepad: xinput1_3.dll not loaded; VR controllers off");
+    VR_LOG_WARN("vr gamepad: xinput1_3.dll not loaded; VR controllers (and free camera pad) off");
     return;
   }
   // The game imports these by ordinal: 2 = XInputGetState, 3 = XInputSetState.
@@ -225,7 +251,8 @@ void Install(bool early) {
                                         reinterpret_cast<void**>(&g_origGetState)) &&
                   vrcore::hook::Install("XInputSetState", setState, reinterpret_cast<void*>(&HookSetState),
                                         reinterpret_cast<void**>(&g_origSetState));
-  VR_LOG_INFO("vr gamepad %s%s", ok ? "installed (VR controllers act as player 0's gamepad)" : "FAILED",
+  VR_LOG_INFO("vr gamepad %s%s", !ok ? "FAILED" : VrActive() ? "installed (VR controllers act as player 0's gamepad)"
+                                                              : "installed (free camera only)",
               early ? " at attach" : "");
 }
 

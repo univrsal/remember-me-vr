@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "engine.h"
+#include "free_cam.h"
 #include "sensen_stereo.h"
 #include "vrcore/hook.h"
 #include "vrcore/log.h"
@@ -30,8 +31,7 @@ struct EyeOverride {
   float testOffset = 0.0f;   // side-by-side test: shift along the view's right axis (uu)
   XrPosef pose{};
   XrFovf fov{};
-  bool haveRotation = false;  // set by the view-point hook
-  Rot rotation{};             // eye rotation computed there
+  Rot rotation{};             // eye rotation computed by the view-point hook
 };
 
 struct State {
@@ -57,6 +57,18 @@ struct State {
   bool loggedLookAt = false;
 
   EyeOverride eye;
+
+  // CalcSceneView nesting depth: the free camera only replaces the view point
+  // the game renders with, not GetPlayerViewPoint calls from gameplay code.
+  int inCalcSceneView = 0;
+  // Rotation the view-point hook produced (VR eye or free camera), for the
+  // look-at that follows it in CalcSceneView; cleared by every view-point call.
+  bool haveLookAtRotation = false;
+  Rot lookAtRotation{};
+  // The last VR frame's left-eye world rotation (free camera: move where the head looks).
+  bool haveHead = false;
+  bool vrFrame = false;  // the current main CalcSceneView renders the headset's eyes
+  FRotator head{};
 
   // Render mono while one of these controller bools is set (loading screens,
   // menus).
@@ -107,7 +119,13 @@ int32_t ViewCount(void* family) {
 
 void __fastcall HookGetPlayerViewPoint(void* controller, void* /*edx*/, FVector* location, FRotator* rotation) {
   g_origGetPlayerViewPoint(controller, location, rotation);
-  if (!g.eye.active || !location || !rotation) return;
+  g.haveLookAtRotation = false;
+  if (!location || !rotation) return;
+  if (g.inCalcSceneView > 0 && free_cam::Apply(location, rotation, g.vrFrame)) {
+    g.lookAtRotation = {rotation->pitch, rotation->yaw, rotation->roll};
+    g.haveLookAtRotation = true;
+  }
+  if (!g.eye.active) return;
   if (g.eye.vr) {
     vrcore::ue3::Vec loc;
     vrcore::ue3::Rot rot;
@@ -116,7 +134,8 @@ void __fastcall HookGetPlayerViewPoint(void* controller, void* /*edx*/, FVector*
     *location = {loc.x, loc.y, loc.z};
     *rotation = {rot.pitch, rot.yaw, rot.roll};
     g.eye.rotation = rot;
-    g.eye.haveRotation = true;
+    g.lookAtRotation = rot;
+    g.haveLookAtRotation = true;
   } else {
     // UE3: X forward, Y right, Z up; yaw in 65536ths of a turn. Right = (-sin, cos, 0).
     const float yaw = static_cast<float>(rotation->yaw) * (6.2831853f / 65536.0f);
@@ -135,27 +154,29 @@ float* __fastcall HookPerspectiveMatrix(float* out, void* /*edx*/, float halfFov
 void __fastcall HookPovLookAt(void* pov, void* /*edx*/, float lx, float ly, float lz, float tx, float ty, float tz) {
   void* const caller = __builtin_return_address(0);
   g_origPovLookAt(pov, lx, ly, lz, tx, ty, tz);
-  // Only the look-at in CalcSceneView, only during our eye calls. The view
-  // matrix is built from (target - location) (0x0040DC60), so move the target
-  // onto the eye's forward axis, at the game's target distance (kept for e.g.
-  // depth-of-field focus), and put the eye rotation back.
-  if (caller != g_povLookAtReturn || !g.eye.active || !g.eye.vr || !g.eye.haveRotation) return;
+  // Only the look-at in CalcSceneView, only after the view-point hook
+  // replaced the rotation (VR eye or free camera). The view matrix is built
+  // from (target - location) (0x0040DC60), so move the target onto the view's
+  // forward axis, at the game's target distance (kept for e.g. depth-of-field
+  // focus), and put our rotation back.
+  if (caller != g_povLookAtReturn || !g.haveLookAtRotation) return;
+  const Rot rotation = g.lookAtRotation;
   auto* words = static_cast<int32_t*>(pov);
   auto* floats = static_cast<float*>(pov);
-  words[kPovRotation + 0] = g.eye.rotation.pitch;
-  words[kPovRotation + 1] = g.eye.rotation.yaw;
-  words[kPovRotation + 2] = g.eye.rotation.roll;
+  words[kPovRotation + 0] = rotation.pitch;
+  words[kPovRotation + 1] = rotation.yaw;
+  words[kPovRotation + 2] = rotation.roll;
   const float dx = tx - lx, dy = ty - ly, dz = tz - lz;
   const float distance = std::max(std::sqrt(dx * dx + dy * dy + dz * dz), 100.0f);
   constexpr float kUnitsToRad = 6.28318530718f / 65536.0f;
-  const float pitch = g.eye.rotation.pitch * kUnitsToRad, yaw = g.eye.rotation.yaw * kUnitsToRad;
+  const float pitch = rotation.pitch * kUnitsToRad, yaw = rotation.yaw * kUnitsToRad;
   floats[kPovTarget + 0] = lx + std::cos(pitch) * std::cos(yaw) * distance;
   floats[kPovTarget + 1] = ly + std::cos(pitch) * std::sin(yaw) * distance;
   floats[kPovTarget + 2] = lz + std::sin(pitch) * distance;
   if (!g.loggedLookAt) {
     g.loggedLookAt = true;
-    VR_LOG_INFO("look-at override active: game target %.0f uu away, eye rotation (%d, %d, %d)", distance,
-                g.eye.rotation.pitch, g.eye.rotation.yaw, g.eye.rotation.roll);
+    VR_LOG_INFO("look-at override active: game target %.0f uu away, rotation (%d, %d, %d)", distance,
+                rotation.pitch, rotation.yaw, rotation.roll);
   }
 }
 
@@ -208,13 +229,13 @@ void* CallEye(void* self, float originX, float sizeX, void* viewState, const Eye
   return view;
 }
 
-void* __fastcall HookCalcSceneView(void* self, void* /*edx*/, void* family, FVector* loc, FRotator* rot,
-                                   void* viewport, void* drawer, void* outProjection, void* outView) {
+void* CalcSceneView(void* self, void* family, FVector* loc, FRotator* rot, void* viewport, void* drawer,
+                    void* outProjection, void* outView, void* caller) {
   const bool matricesOnly = outProjection && outView;
   // Temporary view families (screen-bounds checks, DeProject, ...): one view
   // matching the current left eye, so screen-space results agree with View[0];
   // never a new stereo frame (that would queue an extra frame for Present).
-  if (__builtin_return_address(0) != g_mainCallReturn && !matricesOnly) {
+  if (caller != g_mainCallReturn && !matricesOnly) {
     if (!g.haveLastLeft) {
       return g_origCalcSceneView(self, family, loc, rot, viewport, drawer, outProjection, outView);
     }
@@ -225,8 +246,8 @@ void* __fastcall HookCalcSceneView(void* self, void* /*edx*/, void* family, FVec
     Field<FVector2D>(self, kLocalPlayerOrigin) = origin;
     Field<FVector2D>(self, kLocalPlayerSize) = size;
     if (g.tempCalls++ == 0) {
-      VR_LOG_INFO("CalcSceneView from %p (temporary view family %p): left-eye view, no stereo frame",
-                  __builtin_return_address(0), family);
+      VR_LOG_INFO("CalcSceneView from %p (temporary view family %p): left-eye view, no stereo frame", caller,
+                  family);
     }
     return view;
   }
@@ -241,6 +262,13 @@ void* __fastcall HookCalcSceneView(void* self, void* /*edx*/, void* family, FVec
   vrcore::StereoFrame frame;
   const bool vr = !matricesOnly && !loading && g.vrStereo && g.compositor && g.compositor->BeginStereoFrame(frame);
   const bool sbs = !matricesOnly && !loading && !vr && g.sideBySide.load(std::memory_order_relaxed);
+
+  // Once per rendered frame: free camera toggle and movement.
+  if (!matricesOnly) {
+    g.vrFrame = vr;
+    free_cam::InstallInputHooks(viewport);
+    free_cam::Update(vr, vr && g.haveHead ? &g.head : nullptr);
+  }
 
   void* view;
   void* rightView = nullptr;
@@ -280,6 +308,10 @@ void* __fastcall HookCalcSceneView(void* self, void* /*edx*/, void* family, FVec
     view = CallEye(self, origin.x, half, viewState, left, family, loc, rot, viewport, drawer);
     g.lastLeft = left;
     g.haveLastLeft = true;
+    if (vr) {
+      g.head = {g.eye.rotation.pitch, g.eye.rotation.yaw, g.eye.rotation.roll};
+      g.haveHead = true;
+    }
     if (view) {
       float leftView[16];
       for (int i = 0; i < 16; ++i) {
@@ -324,6 +356,15 @@ void* __fastcall HookCalcSceneView(void* self, void* /*edx*/, void* family, FVec
                   g.symmetricProjection ? " (symmetric projection)" : "");
     }
   }
+  return view;
+}
+
+void* __fastcall HookCalcSceneView(void* self, void* /*edx*/, void* family, FVector* loc, FRotator* rot,
+                                   void* viewport, void* drawer, void* outProjection, void* outView) {
+  ++g.inCalcSceneView;
+  void* view = CalcSceneView(self, family, loc, rot, viewport, drawer, outProjection, outView,
+                             __builtin_return_address(0));
+  --g.inCalcSceneView;
   return view;
 }
 

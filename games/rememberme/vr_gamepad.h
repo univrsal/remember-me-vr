@@ -1,5 +1,8 @@
 #pragma once
 
+#include <windows.h>
+#include <xinput.h>
+
 #include "vrcore/compositor.h"
 #include "vrcore/config.h"
 
@@ -28,6 +31,11 @@ void Configure(const vrcore::Config& config, vrcore::Compositor* compositor);
 // fed to the game's enumeration callback whenever no XInput pad is
 // registered. Known build only; call once the exe is unpacked.
 void InstallDeviceRegistration();
+// Player 0's pad as the game would get it without the free camera (VR
+// controllers merged with a real pad). False if none / not installed.
+bool ReadPad(XINPUT_GAMEPAD& pad);
+// Installed for the VR controllers and for the free camera (which reads the
+// pad and hides it from the game while active).
 // early: from DllMain (xinput1_3 must already be loaded, no LoadLibrary);
 // otherwise loads it if needed. Installs once.
 void Install(bool early = false);

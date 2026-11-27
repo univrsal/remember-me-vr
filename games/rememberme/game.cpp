@@ -5,6 +5,7 @@
 #include "device_state_hooks.h"
 #include "draw_fixes.h"
 #include "engine.h"
+#include "free_cam.h"
 #include "mirror.h"
 #include "renderer_hooks.h"
 #include "scene_view_hooks.h"
@@ -31,6 +32,7 @@ class RememberMe final : public vrcore::Game {
   }
 
   void OnAttach(const vrcore::Config& config, bool knownBuild) override {
+    instance_ = this;
     knownBuild_ = knownBuild;
     presentLogInterval_ = config.GetInt("Debug", "PresentLogInterval", 0);
     vrEnabled_ = config.GetBool("VR", "Enabled", true);
@@ -60,6 +62,9 @@ class RememberMe final : public vrcore::Game {
     engineHooks_ = config.GetBool("Stereo", "EngineHooks", true);
     disableMotionBlur_ = config.GetBool("VR", "DisableMotionBlur", true);
     sceneViews_.Configure(config, vrEnabled_ ? &compositor_ : nullptr);
+    // Before the gamepad hook: the free camera needs it too.
+    rm::free_cam::Configure(config);
+    rm::free_cam::SetNameLookup(&NameOf);
     rm::vr_gamepad::Configure(config, vrEnabled_ ? &compositor_ : nullptr);
     // As early as possible: the game may look for gamepads before the device exists.
     rm::vr_gamepad::Install(/*early=*/true);
@@ -195,6 +200,11 @@ class RememberMe final : public vrcore::Game {
   int ue3DumpKey_ = 0;
   bool dumpKeyDown_ = false;
   vrcore::ue3::Reflection reflection_;
+  static inline RememberMe* instance_ = nullptr;
+  // FName text for the free camera's input hooks ("" until reflection is mapped).
+  static std::string NameOf(int32_t index) {
+    return instance_ && instance_->reflection_.Valid() ? instance_->reflection_.Name(index) : std::string();
+  }
   bool engineHooks_ = true;
   bool disableMotionBlur_ = true;
   bool motionBlurLogged_ = false;
