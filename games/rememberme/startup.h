@@ -8,7 +8,8 @@ namespace rm::startup {
 // StartupMovies) through UE3's -nostartupmovies switch, added to the command
 // line the game sees (GetCommandLineW/A hooked from DllMain, before the exe
 // reads it), and the Capcom / Unreal / DONTNOD / NVIDIA logos, which DONTNOD's
-// movie player plays from script: BinkOpen refuses BIK_Boot_* and StartUpMovie.
+// movie player plays from script: BIK_Boot_* and StartUpMovie jump to their
+// last frame right after BinkOpen (refusing the open crashes the game).
 // Every movie opened is logged (first 40). Story cutscenes are unaffected.
 // [Game] SkipIntroMovies. Call Configure from Game::OnAttach.
 void Configure(const vrcore::Config& config);

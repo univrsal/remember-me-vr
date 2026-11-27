@@ -3,6 +3,7 @@
 #include <windows.h>
 
 #include <cctype>
+#include <cstdint>
 #include <cstring>
 #include <string>
 
@@ -35,10 +36,16 @@ LPSTR WINAPI HookA() { return g_lineA.data(); }
 // --- Boot logos ------------------------------------------------------------
 // DONTNOD's movie player (ExampleGame.DNEMoviePlayer) plays the Capcom /
 // Unreal / DONTNOD / NVIDIA logos from script, not as engine startup movies.
-// They're refused at BinkOpen (binkw32.dll, `_BinkOpen@8`: name or, with
-// BINKFILEHANDLE, a file handle; flags), so the player moves on.
+// They're opened as usual (refusing the open is a fatal "I/O failure" for the
+// game) and then jumped to their last frame with BinkGoto, so the player sees
+// them as finished right away. binkw32.dll: `_BinkOpen@8` (name or, with
+// BINKFILEHANDLE, a file handle; flags), `_BinkGoto@12` (bink, 1-based frame,
+// flags). HBINK starts with U32 Width, Height, Frames, FrameNum.
 using BinkOpen_t = void*(WINAPI*)(const char*, unsigned);
+using BinkGoto_t = void(WINAPI*)(void*, unsigned, int);
 BinkOpen_t g_origBinkOpen = nullptr;
+BinkGoto_t g_binkGoto = nullptr;
+constexpr uint32_t kBinkFrames = 0x8;
 constexpr unsigned kBinkFileHandle = 0x00800000;
 int g_binkLogs = 0;
 
@@ -66,19 +73,26 @@ void* WINAPI HookBinkOpen(const char* name, unsigned flags) {
   const bool skip = IsBootLogo(movie);
   if (g_binkLogs < 40) {
     ++g_binkLogs;
-    VR_LOG_INFO("movie: %s%s", movie.empty() ? "(unknown)" : movie.c_str(), skip ? " -> skipped (boot logo)" : "");
+    VR_LOG_INFO("movie: %s%s", movie.empty() ? "(unknown)" : movie.c_str(),
+                skip ? " -> jumped to its end (boot logo)" : "");
   }
-  if (skip) return nullptr;  // as if the file couldn't be opened
-  return g_origBinkOpen(name, flags);
+  void* bink = g_origBinkOpen(name, flags);
+  if (skip && bink && g_binkGoto) {
+    const uint32_t frames = *reinterpret_cast<const uint32_t*>(static_cast<const char*>(bink) + kBinkFrames);
+    if (frames > 1 && frames < 1000000) g_binkGoto(bink, frames, 0);
+  }
+  return bink;
 }
 
 bool HookBink() {
   HMODULE bink = GetModuleHandleW(L"binkw32.dll");
   void* open = bink ? reinterpret_cast<void*>(GetProcAddress(bink, "_BinkOpen@8")) : nullptr;
-  if (!open) return false;
+  g_binkGoto = bink ? reinterpret_cast<BinkGoto_t>(reinterpret_cast<void*>(GetProcAddress(bink, "_BinkGoto@12")))
+                    : nullptr;
+  if (!open || !g_binkGoto) return false;
   const bool ok = vrcore::hook::Install("BinkOpen", open, reinterpret_cast<void*>(&HookBinkOpen),
                                         reinterpret_cast<void**>(&g_origBinkOpen));
-  VR_LOG_INFO("intro logos: %s", ok ? "skipped (BinkOpen refuses BIK_Boot_* / StartUpMovie)" : "hook FAILED");
+  VR_LOG_INFO("intro logos: %s", ok ? "skipped (BIK_Boot_* / StartUpMovie jump to their end)" : "hook FAILED");
   return true;
 }
 
