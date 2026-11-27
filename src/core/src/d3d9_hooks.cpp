@@ -72,6 +72,62 @@ bool LetterboxRect(IDirect3DSwapChain9* swapchain, const RECT* src, const RECT* 
   return out.left != 0 || out.top != 0 || out.right != client.right || out.bottom != client.bottom;
 }
 
+// When the letterboxed image is smaller than the backbuffer, DXVK's Present
+// scales it with nearest-pixel sampling: fine detail (text, dithering) breaks
+// up in the window. Shrink it here with a bilinear StretchRect into the
+// backbuffer's top-left instead, so Present only copies 1:1. Runs after the
+// frame went to the headset (GetGame().OnPresent), so VR is unaffected.
+IDirect3DSurface9* g_downscale = nullptr;  // D3DPOOL_DEFAULT: released before Reset
+LONG g_downscaleWidth = 0, g_downscaleHeight = 0;
+
+void ReleaseDownscale() {
+  if (g_downscale) g_downscale->Release();
+  g_downscale = nullptr;
+  g_downscaleWidth = g_downscaleHeight = 0;
+}
+
+// `fit` is the destination in the window; on success `out` is the source rect to present.
+bool DownscaleForWindow(IDirect3DDevice9* device, IDirect3DSwapChain9* swapchain, const RECT* src, const RECT& fit,
+                        RECT& out) {
+  const LONG w = fit.right - fit.left, h = fit.bottom - fit.top;
+  IDirect3DSurface9* backbuffer = nullptr;
+  if (w <= 0 || h <= 0 || FAILED(swapchain->GetBackBuffer(0, D3DBACKBUFFER_TYPE_MONO, &backbuffer)) || !backbuffer) {
+    return false;
+  }
+  D3DSURFACE_DESC desc{};
+  backbuffer->GetDesc(&desc);
+  const RECT whole{0, 0, static_cast<LONG>(desc.Width), static_cast<LONG>(desc.Height)};
+  const RECT from = src ? *src : whole;
+  bool ok = false;
+  if (w < from.right - from.left && h < from.bottom - from.top) {
+    if (!g_downscale || g_downscaleWidth != w || g_downscaleHeight != h) {
+      ReleaseDownscale();
+      if (SUCCEEDED(device->CreateRenderTarget(static_cast<UINT>(w), static_cast<UINT>(h), desc.Format,
+                                               D3DMULTISAMPLE_NONE, 0, FALSE, &g_downscale, nullptr)) &&
+          g_downscale) {
+        g_downscaleWidth = w;
+        g_downscaleHeight = h;
+      } else {
+        g_downscale = nullptr;
+      }
+    }
+    const RECT topLeft{0, 0, w, h};
+    if (g_downscale && SUCCEEDED(device->StretchRect(backbuffer, &from, g_downscale, nullptr, D3DTEXF_LINEAR)) &&
+        SUCCEEDED(device->StretchRect(g_downscale, nullptr, backbuffer, &topLeft, D3DTEXF_NONE))) {
+      out = topLeft;
+      ok = true;
+      static bool logged = false;
+      if (!logged) {
+        logged = true;
+        VR_LOG_INFO("present: %ldx%ld image shrunk to %ldx%ld for the window (bilinear)", from.right - from.left,
+                    from.bottom - from.top, w, h);
+      }
+    }
+  }
+  backbuffer->Release();
+  return ok;
+}
+
 void LogLetterbox(const RECT& r) {
   static bool logged = false;
   if (logged) return;
@@ -92,13 +148,14 @@ HRESULT STDMETHODCALLTYPE HookPresent(IDirect3DDevice9* self, const RECT* src, c
   t_inPresent = true;
   scene_tap::detail::BeforePresent(self);
   NotifyPresent(self, "IDirect3DDevice9::Present");
-  RECT fit{};
+  RECT fit{}, shrunk{};
   if (!dst) {
     IDirect3DSwapChain9* swapchain = nullptr;
     if (SUCCEEDED(self->GetSwapChain(0, &swapchain)) && swapchain) {
       if (LetterboxRect(swapchain, src, dst, wnd, fit)) {
         dst = &fit;
         LogLetterbox(fit);
+        if (DownscaleForWindow(self, swapchain, src, fit, shrunk)) src = &shrunk;
       }
       swapchain->Release();
     }
@@ -119,10 +176,15 @@ HRESULT STDMETHODCALLTYPE HookSwapChainPresent(IDirect3DSwapChain9* self, const 
     NotifyPresent(device, "IDirect3DSwapChain9::Present");
     device->Release();
   }
-  RECT fit{};
+  RECT fit{}, shrunk{};
   if (LetterboxRect(self, src, dst, wnd, fit)) {
     dst = &fit;
     LogLetterbox(fit);
+    IDirect3DDevice9* owner = nullptr;
+    if (SUCCEEDED(self->GetDevice(&owner)) && owner) {
+      if (DownscaleForWindow(owner, self, src, fit, shrunk)) src = &shrunk;
+      owner->Release();
+    }
   }
   const HRESULT hr = g_origSwapChainPresent(self, src, dst, wnd, dirty, flags);
   scene_tap::detail::EndFrame();
@@ -138,6 +200,7 @@ HRESULT STDMETHODCALLTYPE HookReset(IDirect3DDevice9* self, D3DPRESENT_PARAMETER
   scene_tap::detail::BeforePresent(self);
   scene_tap::detail::EndFrame();
   scene_tap::detail::ReleaseDeviceResources();  // D3DPOOL_DEFAULT must be gone before Reset
+  ReleaseDownscale();
   const HRESULT hr = g_origReset(self, params);
   if (FAILED(hr)) VR_LOG_WARN("Reset failed: 0x%08lx", hr);
   if (params) GetGame().OnAfterReset(self, *params, hr);
@@ -168,6 +231,7 @@ HRESULT STDMETHODCALLTYPE HookCreateDevice(IDirect3D9* self, UINT adapter, D3DDE
               params ? params->BackBufferWidth : 0, params ? params->BackBufferHeight : 0,
               params ? static_cast<int>(params->BackBufferFormat) : 0, params ? params->Windowed : -1);
   if (params) GetGame().AdjustPresentParameters(*params);
+  ReleaseDownscale();  // the previous device's
   const HRESULT hr = g_origCreateDevice(self, adapter, type, focus, flags, params, out);
   if (FAILED(hr) || !out || !*out) {
     VR_LOG_ERROR("CreateDevice failed: 0x%08lx", hr);
