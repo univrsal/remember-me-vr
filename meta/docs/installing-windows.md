@@ -27,6 +27,7 @@ Nothing to configure; for troubleshooting:
 
 - **Vulkan extensions.** OpenXR needs some Vulkan extensions on DXVK's instance and device. Under Proton, DXVK gets them from Wine's `wineopenxr`; on Windows it doesn't ask, so the mod adds them itself (hooks on `vulkan-1.dll`'s `vkCreateInstance`/`vkCreateDevice`, only those the driver supports). The log shows `vkCreateInstance: added OpenXR extensions …`. A `DXVK's VkInstance lacks …` warning means that didn't work.
 - **GPU queue.** SteamVR on Windows submits work to the Vulkan queue the mod hands it, which is DXVK's. The mod holds DXVK's submission lock around those OpenXR calls; without it the game froze on the first stereo frame.
+- **Window present.** The mod letterboxes the window image inside the backbuffer and presents it without a destination rect. With one, DXVK on Windows falls back to presenting through GDI (`Using GDI for swapchain presentation` in `RememberMe_d3d9.log`): a CPU readback of every frame, and no DXVK HUD.
 - **Freezes.** If the game stops presenting for 5 seconds, the log gets every thread's call chain (`hang: …` lines) and the OpenXR call in progress. `[Debug] HangDumpSeconds` changes the delay (0 = off). Send those lines with a report.
 
 ## Uninstall

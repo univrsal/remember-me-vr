@@ -102,7 +102,9 @@ Each milestone reduces the risk of the next one. **Milestone 3 is the go/no-go g
   - **Freeze on the first stereo frame.** SteamVR on Windows submits to the binding's `VkQueue` (DXVK's) inside `xrBeginFrame`/`xrEndFrame` and the swapchain calls, racing DXVK's submit thread; it then waited forever in D3D11. Those calls now hold DXVK's submission lock (`XrCall` in `compositor.cpp`). Found with the new hang watchdog (`watchdog.cpp`, `[Debug] HangDumpSeconds`).
   - **`RenderScale` < 1.** UE3's windowed backbuffer is the larger of the window and the viewport and never shrinks, so with a render size below the window it was wider than both eyes: broken stereo and part of the right eye in the window. The backbuffer is now kept at the engine viewport's size (`AdjustPresentParameters`). UE3's offscreen targets are likewise sized to the largest viewport seen, so the Sensen composite now maps UVs by the hint layer's actual size.
   - **Window image at `RenderScale` 1.0.** DXVK scales a Present with nearest-pixel sampling, which broke up text and dithering in the window when the render size is larger. The image is shrunk with a bilinear `StretchRect` before Present.
+  - **GDI present.** The letterbox's destination rect made DXVK present through GDI on Windows (windowed DISCARD swapchain with one backbuffer and a partial destination): a CPU readback every frame, and no HUD. The letterboxed image is now composed in the backbuffer and presented with a source rect only. Index at 120 Hz, RX 6700 XT: about 55 fps at `RenderScale` 0.6 before, about 75 fps at 0.9 after. `[Debug] PerfLogSeconds` logs frame timings.
 - [ ] Choppiness check from M3 on Windows
+- [ ] Present without waiting on the GPU: the mod's copy to the OpenXR swapchain waits for the frame (`WaitForResource`) and for its own fence, about 2 ms a frame. Ordering it on DXVK's queue instead would give the render thread that time back
 
 ## M6 — Performance (only if needed)
 

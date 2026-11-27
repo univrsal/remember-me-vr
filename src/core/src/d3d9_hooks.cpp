@@ -47,7 +47,8 @@ uint64_t g_presentCount = 0;
 // fits it centred. False: present as the game asked.
 // `src` may be null or cover the whole backbuffer (UE3's D3D9 RHI passes
 // {0, 0, width, height} in windowed mode); `dst` must be null.
-bool LetterboxRect(IDirect3DSwapChain9* swapchain, const RECT* src, const RECT* dst, HWND wnd, RECT& out) {
+bool LetterboxRect(IDirect3DSwapChain9* swapchain, const RECT* src, const RECT* dst, HWND wnd, RECT& out,
+                   RECT& client) {
   if (dst || !GetGame().LetterboxPresent()) return false;
   D3DPRESENT_PARAMETERS pp{};
   if (!swapchain || FAILED(swapchain->GetPresentParameters(&pp)) || !pp.Windowed) return false;
@@ -64,7 +65,7 @@ bool LetterboxRect(IDirect3DSwapChain9* swapchain, const RECT* src, const RECT* 
       device->Release();
     }
   }
-  RECT client{};
+  client = RECT{};
   if (!window || !GetClientRect(window, &client) || client.right <= 0 || client.bottom <= 0) return false;
   out = FitRect(static_cast<LONG>(pp.BackBufferWidth), static_cast<LONG>(pp.BackBufferHeight), client.right,
                 client.bottom);
@@ -72,11 +73,18 @@ bool LetterboxRect(IDirect3DSwapChain9* swapchain, const RECT* src, const RECT* 
   return out.left != 0 || out.top != 0 || out.right != client.right || out.bottom != client.bottom;
 }
 
-// When the letterboxed image is smaller than the backbuffer, DXVK's Present
-// scales it with nearest-pixel sampling: fine detail (text, dithering) breaks
-// up in the window. Shrink it here with a bilinear StretchRect into the
-// backbuffer's top-left instead, so Present only copies 1:1. Runs after the
-// frame went to the headset (GetGame().OnPresent), so VR is unaffected.
+// The letterboxed window image is composed in the backbuffer itself, and
+// presented with a source rect and no destination rect. A destination rect
+// smaller than the window makes DXVK present through GDI whenever the
+// swapchain is windowed DISCARD with one backbuffer, as UE3's is: a CPU
+// readback of the whole backbuffer every frame, and no DXVK HUD.
+// The composed region has the window's aspect ratio (the window size, scaled
+// down to fit the backbuffer), with black bars and the image scaled into it
+// bilinearly. DXVK's own Present scaling is nearest-pixel, which breaks up
+// text and dithering when it shrinks. Present then copies the region to the
+// whole window, 1:1 unless the window is larger than the backbuffer. Runs
+// after the frame went to the headset (GetGame().OnPresent), so VR is
+// unaffected.
 IDirect3DSurface9* g_downscale = nullptr;  // D3DPOOL_DEFAULT: released before Reset
 LONG g_downscaleWidth = 0, g_downscaleHeight = 0;
 
@@ -86,20 +94,27 @@ void ReleaseDownscale() {
   g_downscaleWidth = g_downscaleHeight = 0;
 }
 
-// `fit` is the destination in the window; on success `out` is the source rect to present.
-bool DownscaleForWindow(IDirect3DDevice9* device, IDirect3DSwapChain9* swapchain, const RECT* src, const RECT& fit,
-                        RECT& out) {
-  const LONG w = fit.right - fit.left, h = fit.bottom - fit.top;
+// `client` is the window's client area; on success `out` is the source rect to
+// present (with no destination rect).
+bool ComposeForWindow(IDirect3DDevice9* device, IDirect3DSwapChain9* swapchain, const RECT* src, const RECT& client,
+                      RECT& out) {
   IDirect3DSurface9* backbuffer = nullptr;
-  if (w <= 0 || h <= 0 || FAILED(swapchain->GetBackBuffer(0, D3DBACKBUFFER_TYPE_MONO, &backbuffer)) || !backbuffer) {
+  if (client.right <= 0 || client.bottom <= 0 ||
+      FAILED(swapchain->GetBackBuffer(0, D3DBACKBUFFER_TYPE_MONO, &backbuffer)) || !backbuffer) {
     return false;
   }
   D3DSURFACE_DESC desc{};
   backbuffer->GetDesc(&desc);
-  const RECT whole{0, 0, static_cast<LONG>(desc.Width), static_cast<LONG>(desc.Height)};
-  const RECT from = src ? *src : whole;
+  const LONG bbw = static_cast<LONG>(desc.Width), bbh = static_cast<LONG>(desc.Height);
+  const RECT from = src ? *src : RECT{0, 0, bbw, bbh};
+  // The region: the window size, scaled down (aspect kept) until it fits the backbuffer.
+  RECT region = FitRect(client.right, client.bottom, bbw, bbh);
+  if (client.right <= bbw && client.bottom <= bbh) region = RECT{0, 0, client.right, client.bottom};
+  region = RECT{0, 0, region.right - region.left, region.bottom - region.top};
+  RECT fit = FitRect(from.right - from.left, from.bottom - from.top, region.right, region.bottom);
+  const LONG w = fit.right - fit.left, h = fit.bottom - fit.top;
   bool ok = false;
-  if (w < from.right - from.left && h < from.bottom - from.top) {
+  if (w > 0 && h > 0 && region.right > 0 && region.bottom > 0) {
     if (!g_downscale || g_downscaleWidth != w || g_downscaleHeight != h) {
       ReleaseDownscale();
       if (SUCCEEDED(device->CreateRenderTarget(static_cast<UINT>(w), static_cast<UINT>(h), desc.Format,
@@ -111,16 +126,18 @@ bool DownscaleForWindow(IDirect3DDevice9* device, IDirect3DSwapChain9* swapchain
         g_downscale = nullptr;
       }
     }
-    const RECT topLeft{0, 0, w, h};
+    // Copy the image out first: the region overlaps it in the backbuffer.
     if (g_downscale && SUCCEEDED(device->StretchRect(backbuffer, &from, g_downscale, nullptr, D3DTEXF_LINEAR)) &&
-        SUCCEEDED(device->StretchRect(g_downscale, nullptr, backbuffer, &topLeft, D3DTEXF_NONE))) {
-      out = topLeft;
+        SUCCEEDED(device->ColorFill(backbuffer, &region, D3DCOLOR_XRGB(0, 0, 0))) &&
+        SUCCEEDED(device->StretchRect(g_downscale, nullptr, backbuffer, &fit, D3DTEXF_NONE))) {
+      out = region;
       ok = true;
       static bool logged = false;
       if (!logged) {
         logged = true;
-        VR_LOG_INFO("present: %ldx%ld image shrunk to %ldx%ld for the window (bilinear)", from.right - from.left,
-                    from.bottom - from.top, w, h);
+        VR_LOG_INFO("present: %ldx%ld image scaled to %ldx%ld (bilinear) in a %ldx%ld region for the %ldx%ld window",
+                    from.right - from.left, from.bottom - from.top, w, h, region.right, region.bottom, client.right,
+                    client.bottom);
       }
     }
   }
@@ -148,14 +165,17 @@ HRESULT STDMETHODCALLTYPE HookPresent(IDirect3DDevice9* self, const RECT* src, c
   t_inPresent = true;
   scene_tap::detail::BeforePresent(self);
   NotifyPresent(self, "IDirect3DDevice9::Present");
-  RECT fit{}, shrunk{};
+  RECT fit{}, client{}, region{};
   if (!dst) {
     IDirect3DSwapChain9* swapchain = nullptr;
     if (SUCCEEDED(self->GetSwapChain(0, &swapchain)) && swapchain) {
-      if (LetterboxRect(swapchain, src, dst, wnd, fit)) {
-        dst = &fit;
+      if (LetterboxRect(swapchain, src, dst, wnd, fit, client)) {
         LogLetterbox(fit);
-        if (DownscaleForWindow(self, swapchain, src, fit, shrunk)) src = &shrunk;
+        if (ComposeForWindow(self, swapchain, src, client, region)) {
+          src = &region;
+        } else {
+          dst = &fit;
+        }
       }
       swapchain->Release();
     }
@@ -176,14 +196,19 @@ HRESULT STDMETHODCALLTYPE HookSwapChainPresent(IDirect3DSwapChain9* self, const 
     NotifyPresent(device, "IDirect3DSwapChain9::Present");
     device->Release();
   }
-  RECT fit{}, shrunk{};
-  if (LetterboxRect(self, src, dst, wnd, fit)) {
-    dst = &fit;
+  RECT fit{}, client{}, region{};
+  if (LetterboxRect(self, src, dst, wnd, fit, client)) {
     LogLetterbox(fit);
+    bool composed = false;
     IDirect3DDevice9* owner = nullptr;
     if (SUCCEEDED(self->GetDevice(&owner)) && owner) {
-      if (DownscaleForWindow(owner, self, src, fit, shrunk)) src = &shrunk;
+      composed = ComposeForWindow(owner, self, src, client, region);
       owner->Release();
+    }
+    if (composed) {
+      src = &region;
+    } else {
+      dst = &fit;
     }
   }
   const HRESULT hr = g_origSwapChainPresent(self, src, dst, wnd, dirty, flags);
