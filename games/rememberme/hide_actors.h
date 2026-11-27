@@ -17,7 +17,9 @@ namespace rm::hide_actors {
 // shadows may remain.
 //
 // The player: PlayerController.Pawn plus actors based on or owned by it. NPCs:
-// every other Pawn (rescanned from GObjects about once a second).
+// every other Pawn and crowd agent, plus actors based on or owned by them.
+// Placed skeletal meshes: SkeletalMeshActor and subclasses (separate option;
+// logged with their mesh names). Rescanned from GObjects about once a second.
 
 void Configure(const vrcore::Config& config);
 void Save(const vrcore::Config& config);
@@ -29,6 +31,10 @@ void SetHidePlayer(bool hide);
 void SetHideNpcs(bool hide);
 bool HidePlayer();
 bool HideNpcs();
+// SkeletalMeshActor and subclasses: characters placed in the level (and
+// DONTNOD's embedded ones) that aren't pawns, but also animated props.
+void SetHideSkeletalMeshes(bool hide);
+bool HideSkeletalMeshes();
 
 // Game thread, once per frame (main CalcSceneView): refreshes the actor list.
 void Update(void* localPlayer);

@@ -4,6 +4,7 @@
 
 #include <atomic>
 #include <cstdint>
+#include <unordered_set>
 #include <vector>
 
 #include "engine.h"
@@ -15,12 +16,18 @@ namespace {
 
 std::atomic<bool> g_hidePlayer{false};
 std::atomic<bool> g_hideNpcs{false};
+std::atomic<bool> g_hideSkeletal{false};
 std::atomic<bool> g_ready{false};
 
 // From reflection (Init, render thread; read on the game thread after g_ready).
 uintptr_t g_objectsArray = 0;  // GObjects TArray header
 uint32_t g_objIndex = 0, g_objClass = 0, g_structSuper = 0;
 uintptr_t g_pawnClass = 0, g_actorClass = 0;
+uintptr_t g_crowdClass = 0;         // Engine.CrowdAgentBase (crowd NPCs; not pawns), 0 if absent
+uintptr_t g_skeletalActorClass = 0;  // Engine.SkeletalMeshActor (placed / animated characters and props)
+uint32_t g_skeletalActorComponent = 0x264;  // SkeletalMeshActor.SkeletalMeshComponent
+int32_t g_componentMesh = -1;               // SkeletalMeshComponent.SkeletalMesh
+const vrcore::ue3::Reflection* g_reflection = nullptr;  // names for the log
 uint32_t g_controllerPawn = 0x264;     // Controller.Pawn
 uint32_t g_hiddenActors = 0x604;       // PlayerController.HiddenActors (TArray)
 uint32_t g_actorOwner = 0x98, g_actorBase = 0x9C;
@@ -31,7 +38,9 @@ struct Entry {
 };
 
 // Game thread.
-std::vector<Entry> g_player, g_npcs;
+std::vector<Entry> g_player, g_npcs, g_skeletal;
+size_t g_loggedSkeletal = static_cast<size_t>(-1);
+int g_skeletalLogs = 0;
 uintptr_t g_scannedPawn = 0;
 uint64_t g_nextScanMs = 0;
 std::vector<uint32_t> g_buffer;  // swapped-in HiddenActors data
@@ -67,9 +76,30 @@ uintptr_t PlayerPawn(void* localPlayer) {
   return pawn;
 }
 
+// The placed skeletal meshes, by class and mesh asset (to tell characters
+// from props); logged when their number changes, a few times per session.
+void LogSkeletal() {
+  if (!g_reflection || g_skeletal.size() == g_loggedSkeletal || g_skeletalLogs >= 4) return;
+  g_loggedSkeletal = g_skeletal.size();
+  ++g_skeletalLogs;
+  VR_LOG_INFO("hide actors: %u placed skeletal mesh actor(s):", static_cast<unsigned>(g_skeletal.size()));
+  int lines = 0;
+  for (const Entry& e : g_skeletal) {
+    if (++lines > 60) {
+      VR_LOG_INFO("  ...");
+      break;
+    }
+    uintptr_t component = Raw<uintptr_t>(e.object + g_skeletalActorComponent), mesh = 0;
+    if (component && g_componentMesh > 0) mesh = Raw<uintptr_t>(component + static_cast<uint32_t>(g_componentMesh));
+    VR_LOG_INFO("  %s: %s", g_reflection->FullName(e.object).c_str(),
+                mesh ? g_reflection->FullName(mesh).c_str() : "(no mesh)");
+  }
+}
+
 void Scan(uintptr_t playerPawn) {
   g_player.clear();
   g_npcs.clear();
+  g_skeletal.clear();
   uintptr_t data = 0;
   int32_t num = 0;
   if (!vrcore::mem::Read(g_objectsArray, data) || !vrcore::mem::Read(g_objectsArray + 4, num) || !data) return;
@@ -81,15 +111,30 @@ void Scan(uintptr_t playerPawn) {
     if (object == playerPawn || (playerPawn && (Raw<uintptr_t>(object + g_actorBase) == playerPawn ||
                                                 Raw<uintptr_t>(object + g_actorOwner) == playerPawn))) {
       g_player.push_back(e);
-    } else if (IsA(object, g_pawnClass)) {
+    } else if (IsA(object, g_pawnClass) || (g_crowdClass && IsA(object, g_crowdClass))) {
       g_npcs.push_back(e);
+    } else if (g_skeletalActorClass && IsA(object, g_skeletalActorClass)) {
+      g_skeletal.push_back(e);
+    }
+  }
+  // What's attached to the NPCs (heads, hair, props as separate actors).
+  std::unordered_set<uintptr_t> npcs;
+  for (const Entry& e : g_npcs) npcs.insert(e.object);
+  const size_t pawns = g_npcs.size();
+  for (int32_t i = 0; i < num && !npcs.empty(); ++i) {
+    const uintptr_t object = Raw<uintptr_t>(data + 4u * i);
+    if (!object || npcs.count(object) || object == playerPawn || !IsA(object, g_actorClass)) continue;
+    if (npcs.count(Raw<uintptr_t>(object + g_actorBase)) || npcs.count(Raw<uintptr_t>(object + g_actorOwner))) {
+      g_npcs.push_back({object, Raw<int32_t>(object + g_objIndex)});
     }
   }
   if (!g_loggedScan) {
     g_loggedScan = true;
-    VR_LOG_INFO("hide actors: %u player actor(s), %u other pawn(s)", static_cast<unsigned>(g_player.size()),
-                static_cast<unsigned>(g_npcs.size()));
+    VR_LOG_INFO("hide actors: %u player actor(s), %u NPC pawn(s)/crowd agent(s) + %u attached",
+                static_cast<unsigned>(g_player.size()), static_cast<unsigned>(pawns),
+                static_cast<unsigned>(g_npcs.size() - pawns));
   }
+  LogSkeletal();
 }
 
 }  // namespace
@@ -97,11 +142,13 @@ void Scan(uintptr_t playerPawn) {
 void Configure(const vrcore::Config& config) {
   g_hidePlayer = config.GetBool("Visibility", "HidePlayer", false);
   g_hideNpcs = config.GetBool("Visibility", "HideNpcs", false);
+  g_hideSkeletal = config.GetBool("Visibility", "HideSkeletalMeshes", false);
 }
 
 void Save(const vrcore::Config& config) {
   config.SetBool("Visibility", "HidePlayer", g_hidePlayer);
   config.SetBool("Visibility", "HideNpcs", g_hideNpcs);
+  config.SetBool("Visibility", "HideSkeletalMeshes", g_hideSkeletal);
 }
 
 void Init(const vrcore::ue3::Reflection& reflection) {
@@ -113,6 +160,12 @@ void Init(const vrcore::ue3::Reflection& reflection) {
   g_structSuper = l.structSuper;
   g_pawnClass = reflection.FindObject("Class Engine.Pawn");
   g_actorClass = reflection.FindObject("Class Engine.Actor");
+  g_crowdClass = reflection.FindObject("Class Engine.CrowdAgentBase");
+  g_skeletalActorClass = reflection.FindObject("Class Engine.SkeletalMeshActor");
+  g_componentMesh = reflection.PropertyOffset("Class Engine.SkeletalMeshComponent", "SkeletalMesh");
+  const int32_t component = reflection.PropertyOffset("Class Engine.SkeletalMeshActor", "SkeletalMeshComponent");
+  if (component > 0) g_skeletalActorComponent = static_cast<uint32_t>(component);
+  g_reflection = &reflection;
   const auto offset = [&](const char* cls, const char* prop, uint32_t& out) {
     const int32_t o = reflection.PropertyOffset(cls, prop);
     if (o > 0) out = static_cast<uint32_t>(o);
@@ -137,9 +190,11 @@ void SetHidePlayer(bool hide) { g_hidePlayer = hide; }
 void SetHideNpcs(bool hide) { g_hideNpcs = hide; }
 bool HidePlayer() { return g_hidePlayer; }
 bool HideNpcs() { return g_hideNpcs; }
+void SetHideSkeletalMeshes(bool hide) { g_hideSkeletal = hide; }
+bool HideSkeletalMeshes() { return g_hideSkeletal; }
 
 void Update(void* localPlayer) {
-  if (!g_ready || (!g_hidePlayer && !g_hideNpcs)) return;
+  if (!g_ready || (!g_hidePlayer && !g_hideNpcs && !g_hideSkeletal)) return;
   const uintptr_t pawn = PlayerPawn(localPlayer);
   const uint64_t now = GetTickCount64();
   if (now < g_nextScanMs && pawn == g_scannedPawn) return;
@@ -149,7 +204,7 @@ void Update(void* localPlayer) {
 }
 
 Scope::Scope(void* localPlayer) {
-  if (!g_ready || (!g_hidePlayer && !g_hideNpcs) || !localPlayer) return;
+  if (!g_ready || (!g_hidePlayer && !g_hideNpcs && !g_hideSkeletal) || !localPlayer) return;
   uintptr_t controller = 0;
   if (!vrcore::mem::Read(reinterpret_cast<uintptr_t>(localPlayer) + kLocalPlayerActor, controller) || !controller) {
     return;
@@ -169,6 +224,7 @@ Scope::Scope(void* localPlayer) {
   };
   if (g_hidePlayer) add(g_player);
   if (g_hideNpcs) add(g_npcs);
+  if (g_hideSkeletal) add(g_skeletal);
   if (static_cast<int32_t>(g_buffer.size()) == gameNum) return;  // nothing of ours
   auto* header = reinterpret_cast<uint32_t*>(array);
   header[0] = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(g_buffer.data()));

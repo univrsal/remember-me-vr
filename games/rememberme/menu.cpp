@@ -319,6 +319,11 @@ void VisibilityTab() {
   bool player = hide_actors::HidePlayer(), npcs = hide_actors::HideNpcs();
   if (ImGui::Checkbox("Hide player", &player)) hide_actors::SetHidePlayer(player);
   if (ImGui::Checkbox("Hide NPCs and enemies", &npcs)) hide_actors::SetHideNpcs(npcs);
+  Help("Pawns and crowd agents, and what's attached to them.");
+  bool skeletal = hide_actors::HideSkeletalMeshes();
+  if (ImGui::Checkbox("Hide placed skeletal meshes", &skeletal)) hide_actors::SetHideSkeletalMeshes(skeletal);
+  Help("Characters placed in the level that aren't NPC pawns (e.g. standing bystanders),\n"
+       "but also animated props such as doors or machinery.");
   ImGui::EndDisabled();
   if (!hide_actors::Available()) ImGui::TextDisabled("(needs the engine hooks and reflection)");
   ImGui::BeginDisabled(!sensen_stereo::Available());
