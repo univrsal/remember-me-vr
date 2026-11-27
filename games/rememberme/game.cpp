@@ -98,6 +98,7 @@ class RememberMe final : public vrcore::Game {
                 dxvk ? "DXVK interop available" : "no DXVK interop");
     if (!dxvk) VR_LOG_WARN("VR output needs DXVK's d3d9.dll (Proton's default, or dxvk next to the exe on Windows)");
     rm::vr_gamepad::Install();
+    rm::startup::InstallLate();
     // The exe is unpacked and the engine initialised by now: map UE3's reflection.
     // Hard-coded engine addresses: only on the build they were found in.
     if (engineHooks_ && !engineHooksInstalled_) {
