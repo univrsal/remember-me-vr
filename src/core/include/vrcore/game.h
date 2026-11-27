@@ -28,10 +28,6 @@ class Game {
   // `knownBuild` is false when the exe's PE timestamp differs from knownTimestamp.
   virtual void OnAttach(const Config& config, bool knownBuild) { (void)config; (void)knownBuild; }
 
-  // Before CreateDevice and Reset: the game may rewrite the presentation
-  // parameters the application asked for (e.g. the backbuffer size).
-  virtual void AdjustPresentParameters(D3DPRESENT_PARAMETERS& params) { (void)params; }
-
   // After IDirect3D9::CreateDevice succeeded. `dxvk` is null when not on DXVK.
   // By now the game's code is unpacked (SteamStub has run), so this is the
   // first safe point to hook game code.

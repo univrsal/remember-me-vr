@@ -1,6 +1,5 @@
 // Remember Me (DONTNOD, 2013; UE3 engineVersion 8636). Steam app 228300.
 
-#include <algorithm>
 #include <atomic>
 #include <cinttypes>
 
@@ -86,22 +85,10 @@ class RememberMe final : public vrcore::Game {
     rm::hide_actors::Configure(config);
     rm::mouse_unlock::Configure(config);
     rm::menu::Configure(config, {config, vrEnabled_ ? &compositor_ : nullptr, &sceneViews_, &disableMotionBlur_});
-    backbufferWidth_ = static_cast<UINT>(std::max(0, config.GetInt("VR", "BackbufferWidth", 0)));
-    backbufferHeight_ = static_cast<UINT>(std::max(0, config.GetInt("VR", "BackbufferHeight", 0)));
     deviceState_.fixDneResolution = config.GetBool("Stereo", "FixDNEResolution", true);
     VR_LOG_INFO("VR %s: mode %s, screen fallback %.1f m wide at %.1f m, recenter key 0x%02x",
                 vrEnabled_ ? "on" : "off", vr.mode == vrcore::Compositor::Mode::Stereo ? "stereo" : "screen",
                 vr.screenWidth, vr.screenDistance, vr.recenterKey);
-  }
-
-  // Windowed only: the backbuffer needn't match the window, so the render size
-  // isn't limited by the monitor. The engine sizes its scene targets from this.
-  void AdjustPresentParameters(D3DPRESENT_PARAMETERS& params) override {
-    if (!backbufferWidth_ || !backbufferHeight_ || !params.Windowed) return;
-    VR_LOG_INFO("backbuffer override: %ux%u -> %ux%u", params.BackBufferWidth, params.BackBufferHeight,
-                backbufferWidth_, backbufferHeight_);
-    params.BackBufferWidth = backbufferWidth_;
-    params.BackBufferHeight = backbufferHeight_;
   }
 
   void OnDeviceCreated(IDirect3DDevice9* device, const D3DPRESENT_PARAMETERS& params,
@@ -265,7 +252,6 @@ class RememberMe final : public vrcore::Game {
     return instance_ && instance_->reflection_.Valid() ? instance_->reflection_.Name(index) : std::string();
   }
   bool engineHooks_ = true;
-  UINT backbufferWidth_ = 0, backbufferHeight_ = 0;
   std::atomic<bool> disableMotionBlur_{true};
   bool motionBlurLogged_ = false;
   bool motionBlurForced_ = false;
