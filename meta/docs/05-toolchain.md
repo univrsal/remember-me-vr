@@ -73,6 +73,6 @@ Notes:
 
 - To get a **vorpX baseline** (see 03): a quick way to see how the game looks in geometric stereo before writing code.
 - If x32dbg or UE Explorer turn out unusable under Wine.
-- For **compatibility testing** before any public release. On Windows the mod expects DXVK's `d3d9.dll` placed next to the exe, so the interop path stays identical. Check that DXVK's OpenXR extension negotiation also works on Windows; if not, the Windows build may need the OpenVR fallback or a D3D9Ex→D3D11 shared-texture path.
+- For **compatibility testing** before any public release. On Windows the mod expects DXVK's `d3d9.dll` placed next to the exe, so the interop path stays identical. ~~Check that DXVK's OpenXR extension negotiation also works on Windows.~~ Answered (2026-11-27): it doesn't (DXVK only asks `wineopenxr`), so the mod adds the extensions itself; see [installing-windows.md](installing-windows.md). The DLL also builds on Windows with MSYS2 ([building.md](building.md)).
 
 None of these block starting on Linux.

@@ -6,7 +6,7 @@ Sources:
 - `re/ghidra/` (Ghidra 12.2 analysis of the Steamless-unpacked exe; `meta/tools/ghidra/query.sh` for terminal queries).
 - The mod's runtime discovery (`vrcore::ue3`), with dumps written to `RememberMeVR_objects.txt` and `RememberMeVR_types.txt` in `Binaries/Win32`. Press F9 in game to refresh them.
 
-All code/data addresses are VAs at the preferred image base `0x00400000`. The exe is ASLR-enabled, so at runtime use `base + (VA - 0x400000)` (`ExeInfo::FromPreferredVA`).
+All code/data addresses are VAs at the preferred image base `0x00400000`. The exe is ASLR-enabled, so at runtime use `base + (VA - 0x400000)` (`ExeInfo::FromPreferredVA`). Wine loads it at `0x00400000`; Windows relocates it (e.g. `0x00640000`) and **rewrites `ImageBase` in the mapped header to the actual base**, so the preferred base is read from the exe file on disk. Byte checks must also skip relocated operands (absolute addresses such as SEH handlers or the security cookie), or compare them against `FromPreferredVA`.
 
 ## Reflection (runtime-discovered)
 

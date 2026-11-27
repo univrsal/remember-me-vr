@@ -50,7 +50,7 @@ In stereo mode the game renders both eyes side by side at `[VR] RenderSize`, wha
 
 See [Performance](#performance) for choosing a size your GPU can handle.
 
-The window just shows that image scaled to fit (letterboxed), so pick any window size that fits your monitor. The mouse is mapped to match. If no headset is found when the game starts, it renders at the window size until the VR session starts, then switches.
+The window just shows that image scaled to fit (letterboxed; shrunk with bilinear filtering when it's larger than the window), so pick any window size that fits your monitor. The mouse is mapped to match. If no headset is found when the game starts, it renders at the window size until the VR session starts, then switches.
 
 The render size only applies to a window (fullscreen renders at the display mode), so with `[VR] ForceWindowed=1` (default) the mod starts the game windowed. That happens if the game is set to fullscreen (its default) or to a window larger than the screen, using a window at the render aspect about 3/4 of the screen's size. The game's own graphics config isn't changed: when the game saves it, the mod writes back your own fullscreen and window settings. `[VR] DisableVSync=1` (default) presents without vsync while VR runs, since the headset paces the game.
 
@@ -93,3 +93,5 @@ If it lags:
 ## Log
 
 `Binaries/Win32/RememberMeVR.log`. `[Log] Level` ranges from `trace` to `off`.
+
+`[Debug] HangDumpSeconds` (default 5): if the game stops presenting for that long, the log gets every thread's registers and likely call chain (`hang: …` lines, module+offset), plus the OpenXR call in progress, once per hang. 0 turns it off. The game's offsets are VAs at `0x00400000` + offset; the mod's resolve with `addr2line` against the same build.

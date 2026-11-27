@@ -94,6 +94,16 @@ Each milestone reduces the risk of the next one. **Milestone 3 is the go/no-go g
   - Hide Sensen hints: the composite draw (pixel shader with `DNESensenParam1`) is skipped, mono and stereo; needs the scene tap (VR on)
 - [x] Valve Index controller support (confirmed 2026-11-27): OpenXR actions (`vrcore::xr::Input`: Index bindings, Touch and simple-controller fallbacks, haptics) presented to the game as player 0's XInput gamepad. The game imports `xinput1_3` by ordinal (2 `XInputGetState`, 3 `XInputSetState`); both are hooked (`src/games/rememberme/vr_gamepad.cpp`), merged with a real gamepad if connected, rumble goes to the controllers. Mapping: sticks (+click), triggers = LT/RT, grips = LB/RB (`squeeze/force`; `squeeze/value` is finger curl and held them down), right A/B = A/B, left A/B = X/Y, right trackpad press = Start, left trackpad press = Back (centre) / D-pad (edges); Touch menu = Start. `[Input] VRControllers`, `GripThreshold`. The sticks first only worked once a real gamepad was plugged in: the game accepts gameplay stick axes and triggers only from pads its DirectInput enumeration registered as XInput devices (at startup and on every `WM_DEVICECHANGE`), and the VR controllers exist only at the XInput level. Fix: whenever no XInput pad is registered, a virtual Xbox 360 pad is fed to the game's enumeration callback, with its WMI IsXInputDevice check hooked to accept it (details in 08, "Gamepad input"). Controller input only arrives while the headset is worn (SteamVR unfocuses the session otherwise). Assessment: fine for looking around; proper gameplay still wants a gamepad or mouse and keyboard, so the mapping stays as is.
 
+## Windows
+
+- [x] Runs on Windows (confirmed 2026-11-27: Windows 10, SteamVR/OpenXR 2.18.4, Index, RX 6700 XT, DXVK `d3d9.dll`). Fixed on the way:
+  - **ASLR base.** Windows relocates the exe and rewrites the mapped `ImageBase`, so every VA was off by the relocation and most game hooks refused to install (prologue mismatch). The preferred base now comes from the file on disk; the gamepad enumeration check no longer compares a relocated SEH handler address (see 08).
+  - **Vulkan extensions.** DXVK only asks `wineopenxr` for OpenXR's Vulkan extensions, so on Windows `xrGetVulkanGraphicsDeviceKHR` failed. `vk_extensions.cpp` adds them on `vulkan-1.dll`'s `vkCreateInstance`/`vkCreateDevice` (where supported; not installed under Wine).
+  - **Freeze on the first stereo frame.** SteamVR on Windows submits to the binding's `VkQueue` (DXVK's) inside `xrBeginFrame`/`xrEndFrame` and the swapchain calls, racing DXVK's submit thread; it then waited forever in D3D11. Those calls now hold DXVK's submission lock (`XrCall` in `compositor.cpp`). Found with the new hang watchdog (`watchdog.cpp`, `[Debug] HangDumpSeconds`).
+  - **`RenderScale` < 1.** UE3's windowed backbuffer is the larger of the window and the viewport and never shrinks, so with a render size below the window it was wider than both eyes: broken stereo and part of the right eye in the window. The backbuffer is now kept at the engine viewport's size (`AdjustPresentParameters`). UE3's offscreen targets are likewise sized to the largest viewport seen, so the Sensen composite now maps UVs by the hint layer's actual size.
+  - **Window image at `RenderScale` 1.0.** DXVK scales a Present with nearest-pixel sampling, which broke up text and dithering in the window when the render size is larger. The image is shrunk with a bilinear `StretchRect` before Present.
+- [ ] Choppiness check from M3 on Windows
+
 ## M6 — Performance (only if needed)
 
 - [ ] Two views in one family (S2) to share shadows, cubemap and scene setup between eyes
@@ -105,7 +115,7 @@ Each milestone reduces the risk of the next one. **Milestone 3 is the go/no-go g
 |---|---|---|
 | Synchronous stereo not achievable in this engine | Low–Medium | S1 needs only a small set of engine hooks; S2 as a second attempt. Decide at M3 |
 | GPU cost of two full draws (S1) too high for the HMD refresh rate | Medium | Measure the baseline in M0; lower eye resolution or `SuperSampleCount`; turn off costly DNE effects; S2 |
-| DXVK's `VkDevice` lacks VR runtime extensions | Medium | Tested first, in M1; OpenVR fallback; separate VR device with external memory |
+| DXVK's `VkDevice` lacks VR runtime extensions | Medium | Tested first, in M1. Proton: fine via `wineopenxr`. Windows: happened; the mod adds them in `vkCreateInstance`/`vkCreateDevice` hooks |
 | Drawing twice triggers game-side effects (HUD script, timers) | Medium | Find them in M2/M3; run them on one eye only |
 | Customised engine differs from known UE3 layouts | Medium | Rely on our own Ghidra, reflection and RenderDoc findings, not other games' SDKs |
 | Scripted cameras and cutscenes are uncomfortable | High | Comfort toggles; cutscene theatre mode |
