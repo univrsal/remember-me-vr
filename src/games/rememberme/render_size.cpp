@@ -390,6 +390,19 @@ void Save(const vrcore::Config& config) {
 }
 
 void AdjustPresentParameters(D3DPRESENT_PARAMETERS& params) {
+  // UE3's windowed D3D9 backbuffer is the larger of the window and the
+  // viewport, and never shrinks; it renders the viewport into the top-left and
+  // presents that rect. A render size smaller than the window (RenderScale < 1)
+  // would leave the backbuffer wider than both eyes, while the compositor,
+  // mirror and UI redirect split it at half its width. Make it exactly the
+  // viewport.
+  const uint32_t vw = g_outWidth, vh = g_outHeight;
+  if (params.Windowed && vw && vh && (params.BackBufferWidth != vw || params.BackBufferHeight != vh)) {
+    VR_LOG_INFO("render size: backbuffer %ux%u -> %ux%u (the engine viewport)", params.BackBufferWidth,
+                params.BackBufferHeight, vw, vh);
+    params.BackBufferWidth = vw;
+    params.BackBufferHeight = vh;
+  }
   if (!g_vr || !g_disableVSync || params.PresentationInterval == D3DPRESENT_INTERVAL_IMMEDIATE) return;
   static bool logged = false;
   if (!logged) {
