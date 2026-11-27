@@ -175,7 +175,6 @@ void Input::Sync(Context& xr) {
       if (XR_SUCCEEDED(getVec2_(xr.Session(), &get, &v)) && v.isActive) {
         s.stick[h][0] = v.currentState.x;
         s.stick[h][1] = v.currentState.y;
-        s.stickActive[h] = true;
         any = true;
       }
       get.action = trigger_;
@@ -202,19 +201,6 @@ void Input::Sync(Context& xr) {
       if (XR_SUCCEEDED(getBool_(xr.Session(), &get, &b)) && b.isActive) s.menu[h] = b.currentState;
     }
     s.active = any;
-    // Diagnostics: stick bindings and values when they change (at most 2x/s).
-    const uint64_t now = GetTickCount64();
-    bool moved = false;
-    for (int h = 0; h < 2; ++h) {
-      for (int a = 0; a < 2; ++a) moved = moved || std::fabs(s.stick[h][a] - loggedStick_[h][a]) > 0.2f;
-    }
-    if (moved && now >= nextStickLogMs_) {
-      nextStickLogMs_ = now + 500;
-      std::memcpy(loggedStick_, s.stick, sizeof(loggedStick_));
-      VR_LOG_INFO("xr input: sticks L(%s) %.2f,%.2f  R(%s) %.2f,%.2f  triggers %.2f %.2f  grips %.2f %.2f",
-                  s.stickActive[0] ? "on" : "off", s.stick[0][0], s.stick[0][1], s.stickActive[1] ? "on" : "off",
-                  s.stick[1][0], s.stick[1][1], s.trigger[0], s.trigger[1], s.grip[0], s.grip[1]);
-    }
     if (any != loggedActive_) {
       loggedActive_ = any;
       VR_LOG_INFO("xr input: controllers %s", any ? "active" : "inactive");

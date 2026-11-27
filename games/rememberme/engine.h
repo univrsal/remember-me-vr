@@ -79,29 +79,6 @@ constexpr uint8_t kAllocateViewStatePrologueB[] = {0x64, 0xA1, 0x00, 0x00, 0x00,
 constexpr uint32_t kSystemSettings = 0x0162EE28;
 constexpr uint32_t kSystemSettingsAllowMotionBlur = 0x38;
 
-// Joystick input (UWindowsClient, FUN_00C7A1B0): DAT_0166E5B0 points to an
-// array of DAT_0166E5B4 entries of 0x2B8 bytes: +0x0 DirectInput device (0 =
-// XInput slot), +0x8 controller id, +0x28C connected (XInput polled only while
-// set, FUN_00C754F0). DAT_0166DCA4: the controller whose unchanged state still
-// gets processed every frame (FUN_00C75600).
-constexpr uint32_t kJoysticks = 0x0166E5B0;
-constexpr uint32_t kJoystickCount = 0x0166E5B4;
-constexpr uint32_t kJoystickStride = 0x2B8;
-constexpr uint32_t kJoystickId = 0x8;
-constexpr uint32_t kJoystickConnected = 0x28C;
-constexpr uint32_t kCurrentController = 0x0166DCA4;
-// GEngine (UGameEngine*) and its GamePlayers (TArray<ULocalPlayer*>).
-constexpr uint32_t kGEngine = 0x01643338;
-constexpr uint32_t kEngineGamePlayers = 0x4EC;
-constexpr uint32_t kLocalPlayerControllerId = 0x64;
-// PlayerController.PlayerInput (UExamplePlayerInput*) and its fields.
-constexpr uint32_t kControllerPlayerInput = 0x4F0;
-constexpr uint32_t kPlayerInputFlags = 0xE4;  // bUsingGamepad etc. (bitfield)
-constexpr uint32_t kPlayerInputJoyLeft = 0x4AC;          // JoyLeft_Y, _X, joyRight_Y, _X
-constexpr uint32_t kPlayerInputGameplayJoyLeft = 0x4BC;  // Gameplay_ variants, same order
-constexpr uint32_t kPlayerInputRawJoyLeft = 0x4CC;       // RawJoy variants, same order
-constexpr uint32_t kPlayerInputActiveControllerId = 0x4DC;
-
 // ULocalPlayer fields.
 constexpr uint32_t kLocalPlayerActor = 0x40;      // PlayerController*
 constexpr uint32_t kLocalPlayerOrigin = 0x6C;     // FVector2D, viewport fraction

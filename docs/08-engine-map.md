@@ -73,6 +73,22 @@ The engine's `GamePlayers` array is at `GEngine + 0x4EC` (`GEngine` = `*(0x01643
 | `eventGetPlayerViewPoint` thunk | `0x006A49F0` | `__thiscall(controller, FVector*, FRotator*)`, `ret 8`; calls the script event via `ProcessEvent` (confirmed) |
 | 2,657 `Class::execFunction` natives | | labelled by `tools/ghidra/LabelUE3Natives.java` |
 
+### Gamepad input (`UWindowsClient`)
+
+How the game reads Xbox controllers, and why the VR controllers have to be registered as a pad (`games/rememberme/vr_gamepad.cpp`):
+
+| What | VA | Notes |
+|---|---|---|
+| Input tick | `0x00C7A1B0` | per joystick entry: XInput slots (`+0x0 == 0`) polled through `0x00C754F0`, DirectInput devices through `0x00C75550` |
+| XInput poll | `0x00C754F0` | `XInputGetState` (xinput1_3 ordinal 2) only while the entry's connected flag (`+0x28C`) is set; stores the result there |
+| Per-controller processing | `0x00C75600` | `__thiscall(viewport, deltaTime, index, XINPUT_STATE)`; sends buttons (`InputKey`, `FViewportClient` vtable `+0x14`) and axes (`InputAxis`, `+0x1C`, `bGamepad = 1`) for the entry's controller id. Unchanged states are skipped unless the entry is the current controller (`0x0166DCA4`) |
+| Joystick table | `0x0166E5B0` / count `0x0166E5B4` | `0x2B8`-byte entries: `+0x0` DirectInput device (0 = XInput slot), `+0x8` controller id, `+0x27C` DirectInput instance GUID, `+0x28C` connected |
+| DirectInput enumeration callback | `0x00C77850` | `stdcall(DIDEVICEINSTANCEW*, ref)`, `ret 8`. Called at `UWindowsClient` init (`0x00C7E050`) and on every `WM_DEVICECHANGE` (window proc `0x00C7B430`, which first resets the XInput pad count). XInput pads are registered in the input device list as pad number `0x0166E4E4` (< 5, then incremented) via `0x00ED1510`; other devices become DirectInput joysticks |
+| IsXInputDevice | `0x00C73700` | `cdecl(const GUID* guidProduct)`, the WMI `IG_` / VID / PID check from Microsoft's sample; **returns 0 for an XInput device** |
+| Input device list | `0x0166D138` | 16 entries of `0xAC` bytes (index = pad number + 1; keyboard/mouse is -1): connected byte, device types, name. Gameplay stick axes and triggers are only accepted (`InputAxis` returns consumed) for a controller registered here; buttons like A/B/X work regardless |
+
+A controller that exists only at the XInput level (the VR controllers) is never enumerated by DirectInput, so its sticks are ignored until a real pad triggers a rescan. `PlayerInput.bUsingGamepad` (`+0xE4`, mask `0x1`) follows gamepad use but is not the gate. `WM_DEVICECHANGE` handling in `0x00F63850` only covers audio devices.
+
 ### `ULocalPlayer::CalcSceneView` (`0x008622B0`)
 
 `__thiscall`, `this` = LocalPlayer. Arguments, as read from the decompile (**verify with a logging hook before relying on them**):

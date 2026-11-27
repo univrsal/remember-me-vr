@@ -20,7 +20,6 @@ struct ControllerState {
   bool padPress[2]{};   // Index: trackpad pressed hard
   bool menu[2]{};       // Touch / simple controller: menu button (left)
   float pad[2][2]{};    // trackpad position (Index), for D-pad directions
-  bool stickActive[2]{};  // the stick action has a binding on this hand
   uint32_t sequence = 0;  // incremented on every sync
 };
 
@@ -64,8 +63,6 @@ class Input {
   float vibrating_[2] = {0.0f, 0.0f};
   uint64_t vibrateRenewMs_[2] = {0, 0};
   bool loggedActive_ = false;
-  uint64_t nextStickLogMs_ = 0;
-  float loggedStick_[2][2]{};
 };
 
 }  // namespace vrcore::xr
