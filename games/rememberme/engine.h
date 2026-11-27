@@ -94,6 +94,13 @@ constexpr uint32_t kCurrentController = 0x0166DCA4;
 constexpr uint32_t kGEngine = 0x01643338;
 constexpr uint32_t kEngineGamePlayers = 0x4EC;
 constexpr uint32_t kLocalPlayerControllerId = 0x64;
+// PlayerController.PlayerInput (UExamplePlayerInput*) and its fields.
+constexpr uint32_t kControllerPlayerInput = 0x4F0;
+constexpr uint32_t kPlayerInputFlags = 0xE4;  // bUsingGamepad etc. (bitfield)
+constexpr uint32_t kPlayerInputJoyLeft = 0x4AC;          // JoyLeft_Y, _X, joyRight_Y, _X
+constexpr uint32_t kPlayerInputGameplayJoyLeft = 0x4BC;  // Gameplay_ variants, same order
+constexpr uint32_t kPlayerInputRawJoyLeft = 0x4CC;       // RawJoy variants, same order
+constexpr uint32_t kPlayerInputActiveControllerId = 0x4DC;
 
 // ULocalPlayer fields.
 constexpr uint32_t kLocalPlayerActor = 0x40;      // PlayerController*

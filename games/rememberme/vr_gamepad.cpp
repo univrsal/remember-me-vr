@@ -47,6 +47,32 @@ T ReadAt(uintptr_t address) {
   return v;
 }
 
+// Player 0's UExamplePlayerInput, or 0.
+uintptr_t PlayerInput0() {
+  const uintptr_t engine = ReadVA<uint32_t>(rm::kGEngine);
+  const uintptr_t players = engine ? ReadAt<uint32_t>(engine + rm::kEngineGamePlayers) : 0;
+  if (!players || ReadAt<int32_t>(engine + rm::kEngineGamePlayers + 4) < 1) return 0;
+  const uintptr_t player = ReadAt<uint32_t>(players);
+  const uintptr_t pc = player ? ReadAt<uint32_t>(player + rm::kLocalPlayerActor) : 0;
+  return pc ? ReadAt<uint32_t>(pc + rm::kControllerPlayerInput) : 0;
+}
+
+// The player input's stick values (raw, filtered, gameplay), for the log.
+std::string PlayerInputSticks() {
+  const uintptr_t pi = PlayerInput0();
+  if (!pi) return "no player input";
+  float v[12];
+  for (int i = 0; i < 4; ++i) {
+    v[i] = ReadAt<float>(pi + rm::kPlayerInputRawJoyLeft + 4u * i);
+    v[4 + i] = ReadAt<float>(pi + rm::kPlayerInputJoyLeft + 4u * i);
+    v[8 + i] = ReadAt<float>(pi + rm::kPlayerInputGameplayJoyLeft + 4u * i);
+  }
+  char buf[200];
+  std::snprintf(buf, sizeof(buf), "raw L %.2f,%.2f R %.2f,%.2f / joy L %.2f,%.2f R %.2f,%.2f / gameplay L %.2f,%.2f R %.2f,%.2f",
+                v[1], v[0], v[3], v[2], v[5], v[4], v[7], v[6], v[9], v[8], v[11], v[10]);
+  return buf;
+}
+
 // Diagnostics (sticks ignored without a real gamepad): the game's joystick
 // table, its "current" controller and the players' ControllerIds, logged when
 // they change (checked once a second).
@@ -73,6 +99,11 @@ void LogInputState() {
     const uintptr_t player = ReadAt<uint32_t>(players + 4u * static_cast<uint32_t>(i));
     std::snprintf(buf, sizeof(buf), " [%d controllerId=%d]", i,
                   player ? ReadAt<int32_t>(player + rm::kLocalPlayerControllerId) : -1);
+    text += buf;
+  }
+  if (const uintptr_t pi = PlayerInput0()) {
+    std::snprintf(buf, sizeof(buf), " input: activeControllerId=%d flags=%08x",
+                  ReadAt<int32_t>(pi + rm::kPlayerInputActiveControllerId), ReadAt<uint32_t>(pi + rm::kPlayerInputFlags));
     text += buf;
   }
   if (text != g_lastDiag) {
@@ -181,6 +212,7 @@ DWORD WINAPI HookGetState(DWORD user, XINPUT_STATE* state) {
   if (moved && now >= g_nextLogMs) {
     g_nextLogMs = now + 500;
     std::memcpy(g_loggedSticks, sticks, sizeof(sticks));
+    VR_LOG_INFO("vr gamepad: player input %s", PlayerInputSticks().c_str());
     VR_LOG_INFO("vr gamepad: to game L %d,%d R %d,%d buttons 0x%04x (real pad %s: L %d,%d R %d,%d)", pad.sThumbLX,
                 pad.sThumbLY, pad.sThumbRX, pad.sThumbRY, pad.wButtons, result == ERROR_SUCCESS ? "present" : "absent",
                 result == ERROR_SUCCESS ? state->Gamepad.sThumbLX : 0, result == ERROR_SUCCESS ? state->Gamepad.sThumbLY : 0,
