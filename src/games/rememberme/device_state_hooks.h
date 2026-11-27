@@ -34,6 +34,8 @@ bool Stage0TextureSize(UINT& width, UINT& height);
 // if the shader doesn't have it (or was created before the hooks).
 int VertexShaderConstant(const char* name);
 int PixelShaderConstant(const char* name);
+// Render thread: the sampler stage of a named sampler in the bound pixel shader, or -1.
+int PixelShaderSampler(const char* name);
 
 // Logs every viewport, texture, sampler state, pixel shader and pixel/vertex
 // shader constant set on the calling thread while enabled (render thread).

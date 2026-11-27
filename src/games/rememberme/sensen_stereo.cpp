@@ -24,6 +24,7 @@ using vrcore::scene_tap::DrawCall;
 // added draws (calling through the vtable keeps device_state's tracking right).
 constexpr size_t kGetBackBuffer = 18;
 constexpr size_t kGetRenderTarget = 38;
+constexpr size_t kGetTexture = 64;
 constexpr size_t kSetViewport = 47;
 constexpr size_t kSetVertexShaderConstantF = 94;
 constexpr size_t kGetVertexShaderConstantF = 95;
@@ -227,8 +228,10 @@ bool DrawHintPerEye(IDirect3DDevice9* device, const DrawCall& call, int reg) {
 // game's tile draws are replaced by one quad per view, drawn at the first tile
 // (later tiles are skipped). The composite discards pixels without hint
 // content, so covering a whole view is safe. The quads map the layer 1:1 onto
-// the viewport (UV = pixel / viewport size) with D3D9's half-pixel offset;
-// vertices are float4 position + float2 UV.
+// the render target (UV = target pixel / layer size) with D3D9's half-pixel
+// offset; vertices are float4 position + float2 UV. The layer can be larger
+// than the viewport: UE3 sizes its offscreen targets to the largest viewport
+// seen (e.g. the window before the render size took over, with RenderScale < 1).
 bool CompositeBothViews(IDirect3DDevice9* device, const DrawCall& call) {
   using GetStreamSource_t = HRESULT(STDMETHODCALLTYPE*)(IDirect3DDevice9*, UINT, IDirect3DVertexBuffer9**, UINT*,
                                                          UINT*);
@@ -236,6 +239,26 @@ bool CompositeBothViews(IDirect3DDevice9* device, const DrawCall& call) {
   const D3DVIEWPORT9& vp = device_state::CurrentViewport();
   if (vp.Width == 0 || vp.Height == 0) return false;
   const float w = static_cast<float>(vp.Width), h = static_cast<float>(vp.Height);
+  // The layer (the composite's SceneColorTexture) size; the viewport's if unknown.
+  float tw = w, th = h, tx = 0, ty = 0;
+  const int stage = device_state::PixelShaderSampler("SceneColorTexture");
+  if (stage >= 0) {
+    using GetTexture_t = HRESULT(STDMETHODCALLTYPE*)(IDirect3DDevice9*, DWORD, IDirect3DBaseTexture9**);
+    IDirect3DBaseTexture9* base = nullptr;
+    if (SUCCEEDED(VFn<GetTexture_t>(device, kGetTexture)(device, static_cast<DWORD>(stage), &base)) && base) {
+      D3DSURFACE_DESC desc{};
+      if (base->GetType() == D3DRTYPE_TEXTURE &&
+          SUCCEEDED(static_cast<IDirect3DTexture9*>(base)->GetLevelDesc(0, &desc)) && desc.Width && desc.Height) {
+        tw = static_cast<float>(desc.Width);
+        th = static_cast<float>(desc.Height);
+        tx = static_cast<float>(vp.X);
+        ty = static_cast<float>(vp.Y);
+      }
+      base->Release();
+    }
+  }
+  const auto u = [&](float px) { return (px + tx) / tw; };
+  const auto v = [&](float py) { return (py + ty) / th; };
   struct Vertex {
     float x, y, z, w, u, v;
   };
@@ -250,18 +273,20 @@ bool CompositeBothViews(IDirect3DDevice9* device, const DrawCall& call) {
     const float px0 = static_cast<float>(r.x) - vp.X, px1 = px0 + r.w;
     const float py0 = static_cast<float>(r.y) - vp.Y, py1 = py0 + r.h;
     const Vertex quad[4] = {
-        {x(px0), y(py0), 0, 1, px0 / w, py0 / h},
-        {x(px1), y(py0), 0, 1, px1 / w, py0 / h},
-        {x(px0), y(py1), 0, 1, px0 / w, py1 / h},
-        {x(px1), y(py1), 0, 1, px1 / w, py1 / h},
+        {x(px0), y(py0), 0, 1, u(px0), v(py0)},
+        {x(px1), y(py0), 0, 1, u(px1), v(py0)},
+        {x(px0), y(py1), 0, 1, u(px0), v(py1)},
+        {x(px1), y(py1), 0, 1, u(px1), v(py1)},
     };
     vrcore::scene_tap::DrawPrimitiveUPDirect(device, D3DPT_TRIANGLESTRIP, 2, quad, sizeof(Vertex));
   }
   VFn<SetStreamSource_t>(device, kSetStreamSource)(device, 0, stream, offset, stride);
   if (stream) stream->Release();
   if (g_composites++ == 0) {
-    VR_LOG_INFO("sensen stereo: composite replaced by one quad per view (game's draw kind %d, viewport %lux%lu)",
-                static_cast<int>(call.kind), vp.Width, vp.Height);
+    VR_LOG_INFO("sensen stereo: composite replaced by one quad per view (game's draw kind %d, viewport %lux%lu, "
+                "layer %.0fx%.0f%s)",
+                static_cast<int>(call.kind), vp.Width, vp.Height, tw, th,
+                stage >= 0 ? "" : "; layer sampler not found, assuming the viewport size");
   }
   return true;
 }

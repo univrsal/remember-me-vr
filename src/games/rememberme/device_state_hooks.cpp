@@ -47,8 +47,13 @@ CreateVertexShader_t g_origCreateVertexShader = nullptr;
 SetVertexShader_t g_origSetVertexShader = nullptr;
 CreatePixelShader_t g_origCreatePixelShader = nullptr;
 
-// Float constants of a shader, from its CTAB comment block: name -> first register.
-using ShaderConstants = std::vector<std::pair<std::string, int>>;
+// Float constants and samplers of a shader, from its CTAB comment block.
+struct ShaderConstant {
+  std::string name;
+  int reg;        // first register (float4) or sampler stage
+  bool sampler;
+};
+using ShaderConstants = std::vector<ShaderConstant>;
 std::mutex g_shadersMutex;
 std::unordered_map<const void*, std::shared_ptr<const ShaderConstants>> g_shaders;
 
@@ -77,7 +82,7 @@ thread_local std::vector<float> t_scratch;
 thread_local std::shared_ptr<const ShaderConstants> t_vs, t_ps;
 thread_local IDirect3DBaseTexture9* t_stage0 = nullptr;  // identity only (bound, so alive)
 
-// Parses the CTAB comment of SM2/3 bytecode into float-register constants.
+// Parses the CTAB comment of SM2/3 bytecode into float-register constants and samplers.
 ShaderConstants ParseConstantTable(const DWORD* code) {
   ShaderConstants out;
   if (!code) return out;
@@ -100,9 +105,9 @@ ShaderConstants ParseConstantTable(const DWORD* code) {
         std::memcpy(&nameOffset, ctab + info + k * 20, 4);
         std::memcpy(&regSet, ctab + info + k * 20 + 4, 2);
         std::memcpy(&regIndex, ctab + info + k * 20 + 6, 2);
-        if (regSet != 2 || nameOffset >= size) continue;  // 2 = D3DXRS_FLOAT4
+        if ((regSet != 2 && regSet != 3) || nameOffset >= size) continue;  // D3DXRS_FLOAT4, D3DXRS_SAMPLER
         const char* name = reinterpret_cast<const char*>(ctab + nameOffset);
-        out.emplace_back(std::string(name, strnlen(name, size - nameOffset)), regIndex);
+        out.push_back({std::string(name, strnlen(name, size - nameOffset)), regIndex, regSet == 3});
       }
       break;
     }
@@ -125,10 +130,10 @@ std::shared_ptr<const ShaderConstants> Lookup(const void* shader) {
   return it == g_shaders.end() ? nullptr : it->second;
 }
 
-int FindConstant(const std::shared_ptr<const ShaderConstants>& shader, const char* name) {
+int FindConstant(const std::shared_ptr<const ShaderConstants>& shader, const char* name, bool sampler = false) {
   if (!shader) return -1;
-  for (const auto& [n, reg] : *shader) {
-    if (n == name) return reg;
+  for (const auto& c : *shader) {
+    if (c.sampler == sampler && c.name == name) return c.reg;
   }
   return -1;
 }
@@ -307,5 +312,6 @@ bool Stage0TextureSize(UINT& width, UINT& height) {
 }
 int VertexShaderConstant(const char* name) { return FindConstant(t_vs, name); }
 int PixelShaderConstant(const char* name) { return FindConstant(t_ps, name); }
+int PixelShaderSampler(const char* name) { return FindConstant(t_ps, name, /*sampler=*/true); }
 
 }  // namespace rm::device_state
