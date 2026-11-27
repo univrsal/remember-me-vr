@@ -3,6 +3,7 @@
 #include <windows.h>
 
 #include <atomic>
+#include <iterator>
 
 #include "engine.h"
 #include "input_capture.h"
@@ -36,8 +37,12 @@ UpdateMouseCursorFn g_origCursor = nullptr;
 
 std::atomic<bool> g_enabled{true};
 bool g_installed = false;
-int32_t g_menuOffset = -1;
-uint32_t g_menuMask = 0;
+struct Flag {
+  int32_t offset;
+  uint32_t mask;
+};
+Flag g_flags[4];  // player controller bools meaning "a menu is up" (bMenuPause, bOnMainMenu)
+int g_flagCount = 0;
 
 // Game thread (CalcSceneView and the window/viewport code both run there).
 bool g_worldMenu = false;       // the world frame says: pause/Sensen menu, paused, or no pawn
@@ -110,11 +115,14 @@ bool WorldMenu(void* localPlayer) {
   if (!vrcore::mem::Read(reinterpret_cast<uintptr_t>(localPlayer) + kLocalPlayerActor, controller) || !controller) {
     return false;
   }
-  uint32_t word = 0;
   uintptr_t pawn = 1, worldInfo = 0, pauser = 0;
-  const bool menuFlag = g_menuOffset >= 0 &&
-                        vrcore::mem::Read(controller + static_cast<uint32_t>(g_menuOffset), word) &&
-                        (word & g_menuMask) != 0;
+  bool menuFlag = false;
+  for (int i = 0; i < g_flagCount; ++i) {
+    uint32_t word = 0;
+    if (vrcore::mem::Read(controller + static_cast<uint32_t>(g_flags[i].offset), word) && (word & g_flags[i].mask)) {
+      menuFlag = true;
+    }
+  }
   vrcore::mem::Read(controller + kControllerPawn, pawn);
   if (vrcore::mem::Read(controller + kActorWorldInfo, worldInfo) && worldInfo) {
     vrcore::mem::Read(worldInfo + kWorldInfoPauser, pauser);
@@ -161,9 +169,8 @@ void Install() {
   VR_LOG_INFO("mouse unlock %s (cursor free in menus)", ok ? "installed" : "FAILED");
 }
 
-void SetMenuFlag(int32_t offset, uint32_t mask) {
-  g_menuOffset = offset;
-  g_menuMask = mask;
+void AddMenuFlag(int32_t offset, uint32_t mask) {
+  if (g_flagCount < static_cast<int>(std::size(g_flags))) g_flags[g_flagCount++] = {offset, mask};
 }
 
 void Update(void* localPlayer, void* viewport) {

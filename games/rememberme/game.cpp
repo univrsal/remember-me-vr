@@ -14,6 +14,7 @@
 #include "mouse_unlock.h"
 #include "renderer_hooks.h"
 #include "scene_view_hooks.h"
+#include "startup.h"
 #include "sensen_stereo.h"
 #include "vr_gamepad.h"
 #include "vrcore/compositor.h"
@@ -39,6 +40,8 @@ class RememberMe final : public vrcore::Game {
   void OnAttach(const vrcore::Config& config, bool knownBuild) override {
     instance_ = this;
     knownBuild_ = knownBuild;
+    // First: the command line hook must be in before the exe's WinMain reads it.
+    rm::startup::Configure(config);
     presentLogInterval_ = config.GetInt("Debug", "PresentLogInterval", 0);
     vrEnabled_ = config.GetBool("VR", "Enabled", true);
     vrcore::Compositor::Settings vr;
@@ -130,10 +133,17 @@ class RememberMe final : public vrcore::Game {
           uint32_t mask = 0;
           if (reflection_.BoolProperty("Class ExampleGame.ExamplePlayerController", f.property, offset, mask)) {
             sceneViews_.AddFlatFlag(f.name, offset, mask, f.menu);
-            if (f.menu) rm::mouse_unlock::SetMenuFlag(offset, mask);
+            if (f.menu) rm::mouse_unlock::AddMenuFlag(offset, mask);
           } else {
             VR_LOG_WARN("ExamplePlayerController.%s not found; %ss stay stereo", f.property, f.name);
           }
+        }
+      }
+      {
+        int32_t offset = -1;
+        uint32_t mask = 0;
+        if (reflection_.BoolProperty("Class ExampleGame.ExamplePlayerController", "bOnMainMenu", offset, mask)) {
+          rm::mouse_unlock::AddMenuFlag(offset, mask);
         }
       }
       if (ue3DumpOnStart_) DumpObjects("start");

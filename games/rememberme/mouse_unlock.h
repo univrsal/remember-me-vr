@@ -7,8 +7,9 @@
 namespace rm::mouse_unlock {
 
 // Frees the Windows mouse cursor while the game shows a menu (pause / Sensen
-// menu: ExamplePlayerController.bMenuPause; main menu: no player pawn), so it
-// can leave the window. In game the game hides the cursor and clips it to the
+// menu: ExamplePlayerController.bMenuPause; main menu: bOnMainMenu; also a
+// paused world, no pawn, or no world frame for a moment), so it can leave the
+// window. In game the game hides the cursor and clips it to the
 // window (UE3 UWindowsViewport, all on the game thread):
 //   0x00C73E60  SetCursorVisible(FViewport* this, UBOOL visible): ShowCursor loop
 //   0x00C73F60  UpdateMouseLock(UWindowsViewport* this): ClipCursor to the client rect
@@ -25,7 +26,8 @@ void Install();  // known build, once the exe is unpacked
 bool Available();
 bool Enabled();
 void SetEnabled(bool enabled);  // any thread (config menu)
-void SetMenuFlag(int32_t offset, uint32_t mask);  // bMenuPause on the player controller
+// A player controller bool meaning "a menu is up" (bMenuPause, bOnMainMenu).
+void AddMenuFlag(int32_t offset, uint32_t mask);
 
 // Game thread, once per frame (main CalcSceneView): `viewport` is the
 // FViewport (UWindowsViewport + 4).

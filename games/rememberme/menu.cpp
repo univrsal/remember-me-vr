@@ -28,7 +28,7 @@ constexpr UINT kWidth = 1280;  // menu texture (VR panel aspect follows it)
 constexpr UINT kHeight = 960;
 
 Targets g_targets;
-float g_cursorSpeed = 4.5f;  // [Menu] CursorSpeed: menu pixels per mouse count
+float g_cursorSpeed = 20.0f;  // [Menu] CursorSpeed: menu pixels per mouse count
 bool g_imguiReady = false;
 bool g_backendReady = false;
 IDirect3DDevice9* g_device = nullptr;  // identity only
@@ -382,7 +382,7 @@ void DisplayTab() {
   if (ImGui::Checkbox("Free the mouse cursor in game menus", &freeMouse)) mouse_unlock::SetEnabled(freeMouse);
   Help("Pause, Sensen and main menu: show the cursor and let it leave the window.");
   ImGui::EndDisabled();
-  ImGui::SliderFloat("Menu cursor speed", &g_cursorSpeed, 0.5f, 15.0f, "%.1f");
+  ImGui::SliderFloat("Menu cursor speed", &g_cursorSpeed, 1.0f, 60.0f, "%.1f");
   if (g_targets.disableMotionBlur) {
     bool off = g_targets.disableMotionBlur->load();
     if (ImGui::Checkbox("Disable motion blur", &off)) *g_targets.disableMotionBlur = off;
