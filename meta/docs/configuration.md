@@ -50,7 +50,7 @@ In stereo mode the game renders both eyes side by side at `[VR] RenderSize`, wha
 
 See [Performance](#performance) for choosing a size your GPU can handle.
 
-The window just shows that image scaled to fit (letterboxed; shrunk with bilinear filtering when it's larger than the window), so pick any window size that fits your monitor. The mouse is mapped to match. If no headset is found when the game starts, it renders at the window size until the VR session starts, then switches.
+The window just shows that image scaled to fit (letterboxed, scaled with bilinear filtering), so pick any window size that fits your monitor. The mouse is mapped to match. If no headset is found when the game starts, it renders at the window size until the VR session starts, then switches.
 
 The render size only applies to a window (fullscreen renders at the display mode), so with `[VR] ForceWindowed=1` (default) the mod starts the game windowed. That happens if the game is set to fullscreen (its default) or to a window larger than the screen, using a window at the render aspect about 3/4 of the screen's size. The game's own graphics config isn't changed: when the game saves it, the mod writes back your own fullscreen and window settings. `[VR] DisableVSync=1` (default) presents without vsync while VR runs, since the headset paces the game.
 
@@ -83,12 +83,16 @@ Example: Valve Index (panel 1440×1600 per eye), SteamVR recommending 2384×2648
 | 0.7 | 1669×1854 | 1.3× | starts to lag |
 | 1.0 | 2384×2648 | 2.7× | far too slow |
 
+On Windows the same setup runs at about 75 fps at `RenderScale` 0.9 (GPU load 65–100%).
+
 If it lags:
 
 - Lower `[VR] RenderScale`, or keep it at 1.0 and lower this game's resolution in SteamVR (per-app video settings; `auto` follows it). The log line `render size hooks installed; …` shows the size in use.
 - Run the headset at a lower refresh rate (e.g. 90 or 80 Hz instead of 120/144): each frame then gets more time, which often allows a higher resolution.
-- SteamVR's motion smoothing can cover occasional missed frames.
+- SteamVR's motion smoothing can cover occasional missed frames, but it warps moving objects (the character looks distorted when the game camera turns). Turn it off for this game if that bothers you.
 - Lower the game's own effect and shadow quality.
+
+To measure: `[Debug] PerfLogSeconds=5` logs a `perf:` line every 5 seconds with the frame rate, the headset's refresh rate, and average/max milliseconds for the frame, `xrWaitFrame` (near 0 means the game is slower than the headset), the mod's GPU wait and copy, `xrEndFrame`, and the rest of the frame (the game's own work). DXVK's HUD shows the GPU load: put `dxvk.hud = fps,frametimes,gpuload` in a `dxvk.conf` next to `RememberMe.exe` (or set `DXVK_HUD`; on Windows Steam must be restarted to pass it on). It's drawn in the game window, not in the headset. Well below 100% GPU load means the CPU is the limit.
 
 ## Log
 

@@ -10,6 +10,14 @@ namespace vrcore {
 namespace {
 
 constexpr uint64_t kInitRetryMs = 10000;
+
+double NowMs() {
+  static LARGE_INTEGER frequency{};
+  if (!frequency.QuadPart) QueryPerformanceFrequency(&frequency);
+  LARGE_INTEGER now;
+  QueryPerformanceCounter(&now);
+  return static_cast<double>(now.QuadPart) * 1000.0 / static_cast<double>(frequency.QuadPart);
+}
 constexpr size_t kMaxQueuedFrames = 3;
 
 struct InteropGuard {
@@ -119,6 +127,7 @@ void Compositor::OnPresent(IDirect3DDevice9* device, IDirect3DTexture9* sceneTex
   DxvkInterop dxvk;
   if (!QueryDxvkInterop(device, dxvk, /*quiet=*/true)) return;
   InteropGuard guard{dxvk};
+  const double presentStartMs = NowMs();
   queueDevice_ = dxvk.device;
   struct ClearQueueDevice {
     ID3D9VkInteropDevice*& device;
@@ -156,7 +165,9 @@ void Compositor::OnPresent(IDirect3DDevice9* device, IDirect3DTexture9* sceneTex
   XrResult result;
   {
     XrCall call("xrWaitFrame", nullptr);
+    const double t0 = NowMs();
     result = xr_.fn.WaitFrame(xr_.Session(), &waitInfo, &frame);
+    PerfAdd(kPerfWaitFrame, NowMs() - t0);
   }
   if (XR_FAILED(result)) {
     VR_LOG_ERROR("xr: xrWaitFrame failed: %s", xr::ResultName(result));
@@ -309,7 +320,15 @@ void Compositor::OnPresent(IDirect3DDevice9* device, IDirect3DTexture9* sceneTex
   endInfo.layers = layerCount ? layers : nullptr;
   {
     XrCall call("xrEndFrame", queueDevice_);
+    const double t0 = NowMs();
     result = xr_.fn.EndFrame(xr_.Session(), &endInfo);
+    PerfAdd(kPerfEndFrame, NowMs() - t0);
+  }
+  {
+    const double now = NowMs();
+    PerfAdd(kPerfCompositor, now - presentStartMs);
+    PerfEndFrame(layerCount && layers[0] == reinterpret_cast<const XrCompositionLayerBaseHeader*>(&projection),
+                 presentStartMs);
   }
   if (XR_FAILED(result)) {
     VR_LOG_ERROR("xr: xrEndFrame failed: %s", xr::ResultName(result));
@@ -473,8 +492,11 @@ bool Compositor::CopyToSwapchain(const DxvkInterop& dxvk, IDirect3DSurface9* sou
   const bool ok = [&] {
   // Make sure the game's frame has finished rendering. LockSubmissionQueue
   // alone doesn't order us after DXVK's queued work, so wait on the GPU.
+  const double gpuWaitStart = NowMs();
   dxvk.device->FlushRenderingCommands();
   dxvk.device->WaitForResource(source, D3DLOCK_READONLY);
+  PerfAdd(kPerfGpuWait, NowMs() - gpuWaitStart);
+  const double copyStart = NowMs();
 
   vk_.ResetCommandBuffer(cmd_, 0);
   VkCommandBufferBeginInfo begin{VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
@@ -530,6 +552,7 @@ bool Compositor::CopyToSwapchain(const DxvkInterop& dxvk, IDirect3DSurface9* sou
   }
   vk_.WaitForFences(vkDevice_, 1, &fence_, VK_TRUE, UINT64_MAX);
   vk_.ResetFences(vkDevice_, 1, &fence_);
+  PerfAdd(kPerfCopy, NowMs() - copyStart);
   return true;
   }();
   XrSwapchainImageReleaseInfo release{XR_TYPE_SWAPCHAIN_IMAGE_RELEASE_INFO};
@@ -541,6 +564,39 @@ bool Compositor::CopyToSwapchain(const DxvkInterop& dxvk, IDirect3DSurface9* sou
 }
 
 void Compositor::OnDeviceChanged() { DestroySwapchains(); }
+
+// One OpenXR frame done: fold its timings into the window; log every perfLogSeconds.
+// "frame" is Present to Present on this thread: the frame time the headset sees.
+void Compositor::PerfEndFrame(bool stereo, double nowMs) {
+  Perf& p = perf_;
+  if (settings_.perfLogSeconds == 0) return;
+  if (p.lastPresentMs > 0) p.frameAccum[kPerfFrame] = nowMs - p.lastPresentMs;
+  p.lastPresentMs = nowMs;
+  if (p.windowStartMs == 0) p.windowStartMs = nowMs;
+  for (int i = 0; i < kPerfSlots; ++i) {
+    p.sum[i] += p.frameAccum[i];
+    p.max[i] = std::max(p.max[i], p.frameAccum[i]);
+    p.frameAccum[i] = 0;
+  }
+  ++p.frames;
+  if (stereo) ++p.stereoFrames;
+  const double elapsed = nowMs - p.windowStartMs;
+  if (elapsed < settings_.perfLogSeconds * 1000.0 || p.frames < 2) return;
+  const double n = static_cast<double>(p.frames);
+  const double hz = displayPeriod_ > 0 ? 1e9 / static_cast<double>(displayPeriod_) : 0.0;
+  VR_LOG_INFO("perf: %.1f fps over %.0f s (%u stereo, %u other), headset %.0f Hz (%.1f ms) | avg/max ms: frame "
+              "%.1f/%.1f, xrWaitFrame %.1f/%.1f, GPU wait %.1f/%.1f, copy %.1f/%.1f, xrEndFrame %.1f/%.1f, "
+              "compositor total %.1f/%.1f, rest of the frame %.1f",
+              n * 1000.0 / elapsed, elapsed / 1000.0, p.stereoFrames, p.frames - p.stereoFrames, hz,
+              hz > 0 ? 1000.0 / hz : 0.0, p.sum[kPerfFrame] / n, p.max[kPerfFrame], p.sum[kPerfWaitFrame] / n,
+              p.max[kPerfWaitFrame], p.sum[kPerfGpuWait] / n, p.max[kPerfGpuWait], p.sum[kPerfCopy] / n,
+              p.max[kPerfCopy], p.sum[kPerfEndFrame] / n, p.max[kPerfEndFrame], p.sum[kPerfCompositor] / n,
+              p.max[kPerfCompositor], (p.sum[kPerfFrame] - p.sum[kPerfCompositor]) / n);
+  const double last = p.lastPresentMs;
+  p = Perf{};
+  p.lastPresentMs = last;
+  p.windowStartMs = nowMs;
+}
 
 // In front of the head (yaw only, upright), menuDistance away, menuHeight
 // below eye height; facing the viewer.

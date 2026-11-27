@@ -57,6 +57,7 @@ class RememberMe final : public vrcore::Game {
     vr.menuDistance = config.GetFloat("VR", "MenuDistance", vr.menuDistance);
     vr.menuWidth = config.GetFloat("VR", "MenuWidth", vr.menuWidth);
     vr.appName = "Remember Me VR";
+    vr.perfLogSeconds = static_cast<unsigned>(std::max(0, config.GetInt("Debug", "PerfLogSeconds", 0)));
     // Render at the headset's resolution whatever the window size (stereo only;
     // needs the engine hooks).
     rm::render_size::Configure(config,

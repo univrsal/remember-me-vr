@@ -49,6 +49,7 @@ class Compositor {
     int recenterKey = 0x77;       // virtual-key code (default F8); 0 = none
     bool windowSizeHint = true;   // log a window size for 1:1 pixels (off when the game's render size is set directly)
     const char* appName = "vrcore";
+    unsigned perfLogSeconds = 0;  // log frame timings every N seconds (0 = off)
   };
 
   Compositor() = default;
@@ -141,6 +142,20 @@ class Compositor {
   XrExtent2Df menuSize_{};
   std::atomic<bool> recenterRequested_{false};
   int sceneSourceLogged_ = -1;  // last logged stereo source (0 backbuffer, n = scene at n x)
+
+  // Frame timings on the presenting thread (Settings::perfLogSeconds).
+  enum PerfSlot { kPerfFrame, kPerfWaitFrame, kPerfGpuWait, kPerfCopy, kPerfEndFrame, kPerfCompositor, kPerfSlots };
+  struct Perf {
+    double windowStartMs = 0;
+    double lastPresentMs = 0;
+    uint32_t frames = 0, stereoFrames = 0;
+    double sum[kPerfSlots]{};
+    double max[kPerfSlots]{};
+    double frameAccum[kPerfSlots]{};  // this frame (several copies add up)
+  };
+  Perf perf_;
+  void PerfAdd(PerfSlot slot, double ms) { perf_.frameAccum[slot] += ms; }
+  void PerfEndFrame(bool stereo, double nowMs);
 
   // Game thread -> presenting thread.
   std::atomic<bool> stereoReady_{false};
