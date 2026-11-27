@@ -61,6 +61,9 @@ struct State {
   // CalcSceneView nesting depth: the free camera only replaces the view point
   // the game renders with, not GetPlayerViewPoint calls from gameplay code.
   int inCalcSceneView = 0;
+  // During the game-camera call for the Sensen hints: no free camera (the
+  // game builds the hints with its own camera).
+  bool gameCameraCall = false;
   // Rotation the view-point hook produced (VR eye or free camera), for the
   // look-at that follows it in CalcSceneView; cleared by every view-point call.
   bool haveLookAtRotation = false;
@@ -121,7 +124,7 @@ void __fastcall HookGetPlayerViewPoint(void* controller, void* /*edx*/, FVector*
   g_origGetPlayerViewPoint(controller, location, rotation);
   g.haveLookAtRotation = false;
   if (!location || !rotation) return;
-  if (g.inCalcSceneView > 0 && free_cam::Apply(location, rotation, g.vrFrame)) {
+  if (g.inCalcSceneView > 0 && !g.gameCameraCall && free_cam::Apply(location, rotation, g.vrFrame)) {
     g.lookAtRotation = {rotation->pitch, rotation->yaw, rotation->roll};
     g.haveLookAtRotation = true;
   }
@@ -229,6 +232,35 @@ void* CallEye(void* self, float originX, float sizeX, void* viewState, const Eye
   return view;
 }
 
+// The game camera's own matrices (game FOV, full viewport, no free camera),
+// which the Sensen hints are built with. Capture before the eye calls change
+// the player's viewport fraction.
+struct GameCamera {
+  alignas(16) float proj[16];
+  alignas(16) float view[16];
+};
+
+GameCamera CaptureGameCamera(void* self, void* family, void* viewport, void* drawer) {
+  GameCamera camera;
+  FVector loc{};
+  FRotator rot{};
+  g.gameCameraCall = true;
+  g_origCalcSceneView(self, family, &loc, &rot, viewport, drawer, camera.proj, camera.view);
+  g.gameCameraCall = false;
+  return camera;
+}
+
+// Queued for sensen_stereo keyed by `view`'s ViewMatrix (the frame's first
+// view), so it can re-project the hints onto the views actually rendered.
+void PushGameCamera(const GameCamera& camera, void* view) {
+  if (!view) return;
+  float key[16];
+  for (int i = 0; i < 16; ++i) {
+    vrcore::mem::Read(reinterpret_cast<uintptr_t>(view) + kViewViewMatrix + i * 4, key[i]);
+  }
+  sensen_stereo::PushGameCamera(key, camera.view, camera.proj);
+}
+
 void* CalcSceneView(void* self, void* family, FVector* loc, FRotator* rot, void* viewport, void* drawer,
                     void* outProjection, void* outView, void* caller) {
   const bool matricesOnly = outProjection && outView;
@@ -275,6 +307,10 @@ void* CalcSceneView(void* self, void* family, FVector* loc, FRotator* rot, void*
   if (!vr && !sbs) {
     if (!matricesOnly) g.haveLastLeft = false;
     view = g_origCalcSceneView(self, family, loc, rot, viewport, drawer, outProjection, outView);
+    // Free camera: the hints still come from the game camera; re-project them.
+    if (!matricesOnly && free_cam::Active()) {
+      PushGameCamera(CaptureGameCamera(self, family, viewport, drawer), view);
+    }
   } else {
     const float half = size.x * 0.5f;
     EyeOverride left, right;
@@ -299,12 +335,8 @@ void* CalcSceneView(void* self, void* family, FVector* loc, FRotator* rot, void*
         right.fov = g.symmetricProjection ? Symmetric(g.testFov[1]) : g.testFov[1];
       }
     }
-    // The game camera's own matrices (mono: game FOV, full viewport), which
-    // the Sensen hints are built with; sensen_stereo re-projects them per eye.
-    alignas(16) float gameProj[16], gameView[16];
-    FVector gameLoc{};
-    FRotator gameRot{};
-    g_origCalcSceneView(self, family, &gameLoc, &gameRot, viewport, drawer, gameProj, gameView);
+    // sensen_stereo re-projects the hints from the game camera per eye.
+    const GameCamera gameCamera = CaptureGameCamera(self, family, viewport, drawer);
     view = CallEye(self, origin.x, half, viewState, left, family, loc, rot, viewport, drawer);
     g.lastLeft = left;
     g.haveLastLeft = true;
@@ -312,13 +344,7 @@ void* CalcSceneView(void* self, void* family, FVector* loc, FRotator* rot, void*
       g.head = {g.eye.rotation.pitch, g.eye.rotation.yaw, g.eye.rotation.roll};
       g.haveHead = true;
     }
-    if (view) {
-      float leftView[16];
-      for (int i = 0; i < 16; ++i) {
-        vrcore::mem::Read(reinterpret_cast<uintptr_t>(view) + kViewViewMatrix + i * 4, leftView[i]);
-      }
-      sensen_stereo::PushGameCamera(leftView, gameView, gameProj);
-    }
+    PushGameCamera(gameCamera, view);
     rightView = CallEye(self, origin.x + half, half, RightEyeState(viewState), right, family, loc, rot, viewport,
                         drawer);
     // Everything after us (HUD, audio listener, ...) sees the normal player again.

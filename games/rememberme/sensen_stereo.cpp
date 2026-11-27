@@ -54,11 +54,12 @@ GameCamera g_cameras[kCameraSlots];
 int g_nextCamera = 0;
 
 // Frame state, touched only on the render thread.
-bool g_stereo = false;  // this frame has two views and corrections
+bool g_stereo = false;  // this frame's hints are redrawn: views and corrections known
+int g_viewCount = 0;    // 2 (stereo) or 1 (mono, free camera)
 ViewData g_views[2];
 float g_correction[2][16]{};  // C_eye, row-major
 bool g_compositeDone = false;  // this frame's composite quads drawn
-uint64_t g_hintDraws = 0, g_composites = 0, g_frames = 0;
+uint64_t g_hintDraws = 0, g_composites = 0, g_frames = 0, g_monoFrames = 0;
 bool g_loggedViewportMismatch = false;
 bool g_loggedNoCamera = false;
 
@@ -199,7 +200,7 @@ bool DrawHintPerEye(IDirect3DDevice9* device, const DrawCall& call, int reg) {
   auto set = VFn<ConstF_t>(device, kSetVertexShaderConstantF);
   auto viewport = VFn<SetViewport_t>(device, kSetViewport);
   float eyeT[16];
-  for (int eye = 0; eye < 2; ++eye) {
+  for (int eye = 0; eye < g_viewCount; ++eye) {
     if (perspective) {
       Multiply(t, g_correction[eye], eyeT);
       set(device, reg, eyeT, 4);
@@ -211,8 +212,9 @@ bool DrawHintPerEye(IDirect3DDevice9* device, const DrawCall& call, int reg) {
   viewport(device, &saved);
   set(device, reg, t, 4);
   if (g_hintDraws++ == 0) {
-    VR_LOG_INFO("sensen stereo: first hint draw redrawn per eye (%s transform; right view %d,%d %dx%d)",
-                perspective ? "perspective" : "flat", g_views[1].x, g_views[1].y, g_views[1].w, g_views[1].h);
+    VR_LOG_INFO("sensen stereo: first hint draw redrawn per view (%s transform; %d view(s), last %d,%d %dx%d)",
+                perspective ? "perspective" : "flat", g_viewCount, g_views[g_viewCount - 1].x,
+                g_views[g_viewCount - 1].y, g_views[g_viewCount - 1].w, g_views[g_viewCount - 1].h);
   }
   return true;
 }
@@ -240,7 +242,8 @@ bool CompositeBothViews(IDirect3DDevice9* device, const DrawCall& call) {
   IDirect3DVertexBuffer9* stream = nullptr;
   UINT offset = 0, stride = 0;
   VFn<GetStreamSource_t>(device, kGetStreamSource)(device, 0, &stream, &offset, &stride);
-  for (const ViewData& r : g_views) {
+  for (int i = 0; i < g_viewCount; ++i) {
+    const ViewData& r = g_views[i];
     const float px0 = static_cast<float>(r.x) - vp.X, px1 = px0 + r.w;
     const float py0 = static_cast<float>(r.y) - vp.Y, py1 = py0 + r.h;
     const Vertex quad[4] = {
@@ -341,25 +344,34 @@ void OnRendererViews(void* renderer) {
   uintptr_t data = 0;
   vrcore::mem::Read(base + kRendererViewsNum, count);
   vrcore::mem::Read(base + kRendererViewsData, data);
-  if (count != 2 || !data) {
+  // Two views: stereo. One view: a mono frame, redrawn only if a game camera
+  // was queued for it (free camera: the hints are built for the game camera,
+  // not the view).
+  if ((count != 1 && count != 2) || !data) {
     g_stereo = false;
     return;
   }
+  g_viewCount = count;
   ReadView(data, g_views[0]);
-  ReadView(data + kViewInfoStride, g_views[1]);
+  if (count == 2) ReadView(data + kViewInfoStride, g_views[1]);
   GameCamera camera;
   if (!FindGameCamera(g_views[0].view, camera)) {
-    if (!g_loggedNoCamera) {
+    if (count == 2 && !g_loggedNoCamera) {
       g_loggedNoCamera = true;
       VR_LOG_WARN("sensen stereo: no game camera recorded for this frame's views; hints not redrawn");
     }
     g_stereo = false;
     return;
   }
-  g_stereo = Correction(camera.view, camera.proj, g_views[0].view, g_views[0].proj, g_correction[0]) &&
-             Correction(camera.view, camera.proj, g_views[1].view, g_views[1].proj, g_correction[1]);
-  if (g_stereo && g_frames++ == 0) {
+  g_stereo = true;
+  for (int i = 0; i < count; ++i) {
+    g_stereo = g_stereo && Correction(camera.view, camera.proj, g_views[i].view, g_views[i].proj, g_correction[i]);
+  }
+  if (g_stereo && count == 2 && g_frames++ == 0) {
     VR_LOG_INFO("sensen stereo: first stereo frame matched to its game camera");
+  }
+  if (g_stereo && count == 1 && g_monoFrames++ == 0) {
+    VR_LOG_INFO("sensen stereo: first mono frame re-projected from the game camera (free camera)");
   }
 }
 
