@@ -48,6 +48,8 @@ In stereo mode the game renders both eyes side by side at `[VR] RenderSize`, wha
 - `WIDTHxHEIGHT`, e.g. `4032x2240`: a fixed size for both eyes together.
 - `window`: the old behaviour, where the window size × `SuperSampleCount` is the render size.
 
+See [Performance](#performance) for choosing a size your GPU can handle.
+
 The window just shows that image scaled to fit (letterboxed), so pick any window size that fits your monitor. The mouse is mapped to match. If no headset is found when the game starts, it renders at the window size until the VR session starts, then switches.
 
 The render size only applies to a window (fullscreen renders at the display mode), so with `[VR] ForceWindowed=1` (default) the mod starts the game windowed. That happens if the game is set to fullscreen (its default) or to a window larger than the screen, using a window at the render aspect about 3/4 of the screen's size. The game's own graphics config isn't changed: when the game saves it, the mod writes back your own fullscreen and window settings. `[VR] DisableVSync=1` (default) presents without vsync while VR runs, since the headset paces the game.
@@ -67,6 +69,26 @@ VSync=false
 ```
 
 The in-game graphics menu may rewrite this file. More in [05-toolchain.md](05-toolchain.md).
+
+## Performance
+
+The render size is the main performance setting: GPU cost grows with the pixel count, i.e. with the square of `RenderScale`. SteamVR's recommended size is usually well above the panel's native resolution, and higher still when its resolution slider is raised, so `auto` at 1.0 can be far more than a GPU handles in this game.
+
+Example: Valve Index (panel 1440×1600 per eye), SteamVR recommending 2384×2648 per eye, RX 6700 XT:
+
+| `RenderScale` | Per eye | vs. native pixels | Result |
+|---|---|---|---|
+| 0.5 | 1192×1324 | 0.7× | smooth |
+| 0.6 | 1430×1589 | about 1× | about native sharpness |
+| 0.7 | 1669×1854 | 1.3× | starts to lag |
+| 1.0 | 2384×2648 | 2.7× | far too slow |
+
+If it lags:
+
+- Lower `[VR] RenderScale`, or keep it at 1.0 and lower this game's resolution in SteamVR (per-app video settings; `auto` follows it). The log line `render size hooks installed; …` shows the size in use.
+- Run the headset at a lower refresh rate (e.g. 90 or 80 Hz instead of 120/144): each frame then gets more time, which often allows a higher resolution.
+- SteamVR's motion smoothing can cover occasional missed frames.
+- Lower the game's own effect and shadow quality.
 
 ## Log
 
