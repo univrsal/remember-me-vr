@@ -37,12 +37,12 @@ jobs:
         run: cmake --build --preset mingw-i686-release
 
       - name: Unit tests (host)
-        run: tools/space-test.sh
+        run: meta/tools/space-test.sh
 
       - name: Package
         id: package
         run: |
-          zip="$(tools/package.sh --game ${{ matrix.game }} | tail -n 1)"
+          zip="$(meta/tools/package.sh --game ${{ matrix.game }} | tail -n 1)"
           echo "zip=$zip" >> "$GITHUB_OUTPUT"
           echo "name=$(basename "$zip" .zip)" >> "$GITHUB_OUTPUT"
 

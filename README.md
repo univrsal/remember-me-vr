@@ -1,131 +1,49 @@
 # Remember Me VR
 
-A work-in-progress VR mod for *Remember Me* (DONTNOD, 2013; Unreal Engine 3, Direct3D 9, 32-bit). The evaluation, design and roadmap are in [`docs/`](docs/README.md).
+A VR mod for *Remember Me* (DONTNOD, 2013; Unreal Engine 3, Direct3D 9, 32-bit). It plays the game in VR through OpenXR, built on a reusable D3D9 VR core.
 
-The repository has two parts:
-- **`core/` (vrcore):** game-independent plumbing for D3D9 VR mods.
-- **`games/<name>/`:** one thin module per game.
+## Features
 
-The idea is that the core can be reused for other D3D9 games.
+- **Stereo rendering:** the game is rendered once per eye, with head tracking and the headset's own projection.
+- **Floating UI:** menus, HUD and subtitles on their own panel; loading screens and menus can be shown on a flat virtual screen.
+- **VR controllers as a gamepad:** Index and Touch bindings, haptics as rumble, merged with a real gamepad if connected.
+- **In-game config menu** (Dear ImGui; mouse, keyboard, gamepad or a VR laser pointer) for most settings, with save.
+- **Free camera**, and options to hide the player, NPCs and Sensen hints.
+- **Free mouse in the game's menus**, and the intro movies are skipped.
+- **Comfort:** level-horizon camera, motion blur off, adjustable world scale.
+- **Monitor mirror:** the game window shows the left eye or both eyes.
+- **Per-eye artifact fixes** for the game's depth-based effects, fog and Sensen AR hints.
 
-## Layout
+### Hotkeys
 
-```
-core/                     vrcore: shared by every game module
-  include/vrcore/         public headers
-    game.h                  the vrcore::Game interface a game module implements
-    log.h config.h          log file + INI config next to the DLL
-    hook.h                  MinHook wrapper (inline + COM vtable-slot hooks)
-    process.h               host exe info (base, PE timestamp, VA/RVA helpers)
-    dxvk_interop.h          DXVK D3D9<->Vulkan interop interfaces
-  src/                    DllMain, D3D9 hooks (Direct3DCreate9 -> CreateDevice -> Present/Reset)
-  proxy/<dll>/            proxy DLL implementations (forwarding exports + .def)
-games/rememberme/         Remember Me module
-  game.cpp                vrcore::Game implementation
-  RememberMeVR.ini        default config
-  deploy.env smoke.env    settings for tools/deploy.sh and tools/smoke-test.sh
-tests/smoke_host.cpp      stand-in game exe for testing a build under Wine
-tools/deploy.sh           install/uninstall into the game folder
-tools/smoke-test.sh       run the smoke host under Wine with the built mod
-tools/space-test.sh       host unit test for the OpenXR <-> UE3 conversions (run in CI)
-tools/package.sh          zip a build for release (used by CI)
-tools/setup-openxr-i686.sh  one-time: let 32-bit OpenXR apps use SteamVR on Linux
-.github/workflows/        CI: build + package on push/PR, release on v* tags
-cmake/                    mingw toolchain file, vrcore_add_mod() helper
-docs/                     evaluation, architecture, roadmap, capture analysis
-```
+| Key | Action |
+|---|---|
+| F6 (or both stick clicks) | Open/close the config menu |
+| F8 | Recenter the view |
+| F9 | Dump the engine's object list (development) |
+| F10 | Toggle the flat side-by-side test (development) |
 
-The following are gitignored and stay local: `re/` (the unpacked exe, Ghidra projects, capture conversions), `tools/steamless/`, `*.rdc` captures, `build/` and `dist/`.
+Keys and all other options are in `RememberMeVR.ini`; see [configuration](meta/docs/configuration.md).
 
-## Building (Linux)
+## Install
 
-Requirements: `mingw-w64-gcc` (i686), CMake ≥ 3.24, Ninja, git. Dependencies (MinHook, Vulkan-Headers, OpenXR headers, Dear ImGui) are fetched at configure time, pinned to tags.
+1. Extract the release zip into the game's install folder (it puts `dinput8.dll` and `RememberMeVR.ini` in `Binaries/Win32`).
+2. Start SteamVR (or another OpenXR runtime) **before** the game.
+3. Linux/Proton also needs a launch option and a one-time OpenXR manifest; Windows needs DXVK's 32-bit `d3d9.dll`.
 
-```sh
-cmake --preset mingw-i686-release        # or mingw-i686-debug
-cmake --build --preset mingw-i686-release
-```
+Details: [Linux / Proton](meta/docs/installing-linux.md) · [Windows](meta/docs/installing-windows.md)
 
-Output: `build/mingw-i686-release/games/rememberme/dinput8.dll` plus `RememberMeVR.ini`. The DLL is self-contained: it only needs KERNEL32 and the Windows CRT.
+## Development
 
-## Testing without the game
-
-```sh
-tools/smoke-test.sh                                   # Wine's own d3d9 (wined3d)
-tools/smoke-test.sh --dxvk ~/.local/share/Steam/steamapps/compatdata/228300/pfx/drive_c/windows/syswow64/d3d9.dll
-```
-
-This runs `tests/smoke_host.exe`, renamed to `RememberMe.exe`, in a throwaway Wine prefix (`~/.cache/vrmod-smoke`). It checks export forwarding, the D3D9 hook chain, Present/Reset and, with `--dxvk`, the DXVK interop query. It prints `PASS` and the mod's log.
-
-With SteamVR running, the full VR path can be tested under Proton without the game:
-
-```sh
-tools/smoke-test.sh --proton --frames 900   # colour-cycling panel in the headset for ~10 s
-```
-
-This uses Proton Experimental in its own prefix under `~/.cache/vrmod-smoke` and sets `SteamGameId` like a Steam launch; Proton only sets up VR for Steam launches.
-
-## Installing into the game
-
-```sh
-tools/deploy.sh install      # copies dinput8.dll (+ default ini if absent) into Binaries/Win32
-tools/deploy.sh status       # what's installed + last log lines
-tools/deploy.sh uninstall    # removes only what install put there
-```
-
-Steam launch options (Proton):
-
-```
-WINEDLLOVERRIDES="dinput8=n,b" %command%
-```
-
-For VR on Linux, two more things are needed:
-
-1. **Once per user:** `tools/setup-openxr-i686.sh`. SteamVR's default OpenXR runtime manifest points at its 64-bit library, which a 32-bit game's Proton OpenXR bridge can't load ("wrong ELF class"). The script writes `~/.config/openxr/1/active_runtime.i686.json`, pointing 32-bit clients at SteamVR's 32-bit `bin/vrclient.so`. 64-bit apps are unaffected; `--remove` undoes it.
-2. **Every session:** start SteamVR *before* the game. DXVK asks the runtime for its Vulkan extensions when the game creates its device.
-
-Press F8 (configurable) to recenter the view.
-
-`RememberMeVR.ini` `[VR]` options: `Mode` (`stereo` or `screen`), `StereoSource` (`scene`: the game's internal scene image, so stereo resolution = window × `SuperSampleCount`; or `backbuffer`), `WorldScale` (Unreal units per metre), `CameraOrientation` (`yaw` keeps the horizon level; `full` follows the game camera), `UiPanel` with `UiDistance`/`UiWidth`/`UiHeight` (the game's UI on its own floating panel in stereo), flat-panel size/distance, recenter key. In stereo mode the game window holds both eyes side by side; the log suggests the window size for 1:1 pixels (`ExampleAdriftGfxConfig.ini`, see docs/05).
-
-The log is written to `Binaries/Win32/RememberMeVR.log`. Set `[Core] Enabled=0` in the INI to turn the mod into a plain pass-through proxy.
-
-## Packaging and CI
-
-```sh
-tools/package.sh             # -> dist/RememberMeVR-<git describe>.zip
-```
-
-The zip mirrors the game folder (`Binaries/Win32/dinput8.dll`, `RememberMeVR.ini`), plus `INSTALL.txt` and `VERSION.txt` at the root, so users extract it straight into the game's install folder. The packaged DLL has its debug info stripped; the copy in `build/` keeps it.
-
-`.github/workflows/build.yml` runs on every push, pull request and manual trigger. It builds with Ubuntu's mingw-w64, packages, and uploads the zip as a workflow artifact.
-
-To publish a release, push a tag starting with `v`:
-
-```sh
-git tag v0.1.0 && git push origin v0.1.0
-```
-
-That creates a GitHub pre-release named after the tag, with the zip attached and auto-generated notes. To build more games in CI, add them to the workflow's `matrix.game` list.
-
-## Adding another game
-
-1. Create `games/<name>/` with:
-   - a `game.cpp` implementing `vrcore::Game` and defining `vrcore::GetGame()`;
-   - a `CMakeLists.txt` calling `vrcore_add_mod(<Target> PROXY <dll> SOURCES game.cpp)`;
-   - a default `.ini`, `deploy.env`, `smoke.env`, `package.env` and `INSTALL.txt`.
-2. Pick a proxy DLL the game imports, and that isn't `d3d9.dll` (that would replace DXVK). If `core/proxy/<dll>/` doesn't exist yet, add one modelled on `core/proxy/dinput8/`.
-3. Configure with `-DVRMOD_GAME=<name>`.
-
-`Game::OnDeviceCreated` is the first safe point to hook game code. On SteamStub-protected executables, `.text` is still encrypted while `DllMain` runs.
+[Documentation index](meta/docs/README.md): [repository layout](meta/docs/layout.md), [building](meta/docs/building.md), [testing](meta/docs/testing.md), [packaging](meta/docs/packaging.md), [adding another game](meta/docs/adding-a-game.md).
 
 ## License
 
-zlib; see [LICENSE](LICENSE). Game files and anything derived from the game binary (`re/`, captures) are not part of this repository.
+zlib; see [LICENSE](LICENSE). Game files and anything derived from the game binary are not part of this repository.
 
 ## Third-party code
 
 - [MinHook](https://github.com/TsudaKageyu/minhook): BSD 2-clause (fetched at build time)
 - [Vulkan-Headers](https://github.com/KhronosGroup/Vulkan-Headers): Apache-2.0 / MIT (fetched at build time)
 - [OpenXR-SDK](https://github.com/KhronosGroup/OpenXR-SDK) headers: Apache-2.0 (fetched at build time; vrcore negotiates with the runtime itself, no loader is linked)
-- `core/include/vrcore/dxvk_interop.h` is trimmed from [DXVK](https://github.com/doitsujin/dxvk) (zlib)
+- `src/core/include/vrcore/dxvk_interop.h` is trimmed from [DXVK](https://github.com/doitsujin/dxvk) (zlib)

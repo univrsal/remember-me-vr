@@ -9,7 +9,7 @@ re/
 *.rep/
 
 # Third-party tools fetched locally
-tools/steamless/
+meta/tools/steamless/
 
 # RenderDoc captures (large, contain game assets)
 *.rdc
@@ -17,5 +17,5 @@ tools/steamless/
 # Build output
 build/
 
-# Packaged zips (tools/package.sh)
+# Packaged zips (meta/tools/package.sh)
 dist/

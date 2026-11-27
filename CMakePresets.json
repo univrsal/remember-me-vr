@@ -5,7 +5,7 @@
       "name": "mingw-i686-base",
       "hidden": true,
       "generator": "Ninja",
-      "toolchainFile": "${sourceDir}/cmake/mingw-i686.cmake",
+      "toolchainFile": "${sourceDir}/meta/cmake/mingw-i686.cmake",
       "binaryDir": "${sourceDir}/build/${presetName}"
     },
     {

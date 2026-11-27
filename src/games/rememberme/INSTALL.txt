@@ -1,0 +1,60 @@
+Remember Me VR mod
+==================
+
+Plays Remember Me in VR through OpenXR: real stereo rendering with head
+tracking, the game's UI on a floating panel, and VR controllers as the
+game's gamepad. Loading screens and menus show on a flat virtual screen.
+
+Hotkeys: F6 (or press both thumbsticks) opens the config menu, F8
+recenters the view. Free camera and other options are in the config menu.
+
+Install
+-------
+1. Extract this archive into the game's install folder (the one that
+   contains Binaries/, Engine/ and ExampleGame/). The files go to:
+
+     Binaries/Win32/dinput8.dll
+     Binaries/Win32/RememberMeVR.ini
+
+2. Start SteamVR (or another OpenXR runtime) BEFORE the game.
+
+Linux (Proton):
+  - Set the game's Steam launch options to
+
+      WINEDLLOVERRIDES="dinput8=n,b" %command%
+
+  - Once per user, create a 32-bit OpenXR runtime manifest for SteamVR,
+    ~/.config/openxr/1/active_runtime.i686.json (adjust the path to your
+    SteamVR install):
+
+      {
+        "file_format_version": "1.0.0",
+        "runtime": {
+          "name": "SteamVR",
+          "VALVE_runtime_is_steamvr": true,
+          "library_path": "/home/<you>/.local/share/Steam/steamapps/common/SteamVR/bin/vrclient.so"
+        }
+      }
+
+Windows:
+  - Put DXVK's 32-bit d3d9.dll in Binaries/Win32
+    (https://github.com/doitsujin/dxvk/releases). Without it the mod only
+    logs and VR output doesn't work.
+
+Window size
+-----------
+In VR the game window holds both eyes side by side, so its size sets the
+eye resolution. The log (RememberMeVR.log) suggests a size; set it in the
+game's ExampleAdriftGfxConfig.ini (ResWinWidth/ResWinHeight/SuperSampleCount,
+under Documents/My Games/UnrealEngine3/RememberMeGame/Config).
+
+Files
+-----
+Settings: Binaries/Win32/RememberMeVR.ini ([Core] Enabled=0 turns the mod off)
+Log:      Binaries/Win32/RememberMeVR.log
+
+Uninstall
+---------
+Delete Binaries/Win32/dinput8.dll, RememberMeVR.ini and RememberMeVR.log.
+
+More documentation: https://github.com/univrsal/remember-me-vr

@@ -12,7 +12,7 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-set(VRMOD_GAME "rememberme" CACHE STRING "Game module to build (directory under games/)")
+set(VRMOD_GAME "rememberme" CACHE STRING "Game module to build (directory under src/games/)")
 
 include(FetchContent)
 
@@ -69,13 +69,13 @@ target_include_directories(vulkan_headers SYSTEM INTERFACE ${vulkan_headers_SOUR
 target_compile_definitions(vulkan_headers INTERFACE VK_NO_PROTOTYPES)
 
 # Headers only: vrcore negotiates with the OpenXR runtime itself (see
-# core/src/xr/runtime_loader.cpp) instead of linking Khronos' loader.
+# src/core/src/xr/runtime_loader.cpp) instead of linking Khronos' loader.
 add_library(openxr_headers INTERFACE)
 target_include_directories(openxr_headers SYSTEM INTERFACE ${openxr_sdk_SOURCE_DIR}/include)
 target_compile_definitions(openxr_headers INTERFACE XR_NO_PROTOTYPES XR_USE_GRAPHICS_API_VULKAN XR_USE_PLATFORM_WIN32)
 
-include(cmake/vrcore.cmake)
+include(meta/cmake/vrcore.cmake)
 
-add_subdirectory(core)
-add_subdirectory(games/${VRMOD_GAME})
-add_subdirectory(tests)
+add_subdirectory(src/core core)
+add_subdirectory(src/games/${VRMOD_GAME} games/${VRMOD_GAME})
+add_subdirectory(src/tests tests)
