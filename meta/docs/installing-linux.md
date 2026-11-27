@@ -38,7 +38,7 @@ From a repository checkout, `meta/tools/setup-openxr-i686.sh` writes this for yo
 
 Start **SteamVR first**, then launch the game from Steam. DXVK asks the runtime for its Vulkan extensions when the game creates its device, so the order matters.
 
-Then make sure the game runs windowed with `SuperSampleCount=1`; the window can be any size: see [configuration.md](configuration.md#resolution-and-window-size).
+No graphics settings are needed: in VR the mod starts the game windowed, at the headset's resolution, without vsync (see [configuration.md](configuration.md#resolution-and-window-size)). Keep the game's `SuperSampleCount` at 1 (its default).
 
 ## Troubleshooting
 

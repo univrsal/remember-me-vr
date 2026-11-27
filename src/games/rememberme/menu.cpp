@@ -15,6 +15,7 @@
 #include "input_capture.h"
 #include "mirror.h"
 #include "mouse_unlock.h"
+#include "render_size.h"
 #include "sensen_stereo.h"
 #include "vr_gamepad.h"
 #include "vrcore/log.h"
@@ -280,6 +281,7 @@ void Save() {
   if (g_targets.disableMotionBlur) config.SetBool("VR", "DisableMotionBlur", g_targets.disableMotionBlur->load());
   config.Set("VR", "MirrorView", mirror::GetView() == mirror::View::Stereo ? "stereo" : "left");
   config.SetBool("VR", "MirrorUi", vrcore::scene_tap::UiMirrorEnabled());
+  render_size::Save(config);
   if (g_targets.compositor) {
     const auto& s = g_targets.compositor->MutableSettings();
     config.SetFloat("VR", "UiDistance", s.uiDistance);
@@ -395,6 +397,14 @@ void DisplayTab() {
     bool mirrorUi = vrcore::scene_tap::UiMirrorEnabled();
     if (ImGui::Checkbox("Draw the HUD into the window", &mirrorUi)) vrcore::scene_tap::EnableUiMirror(mirrorUi);
   }
+  ImGui::SeparatorText("Game window (takes effect at the next start; Save first)");
+  bool windowed = render_size::ForceWindowed();
+  if (ImGui::Checkbox("Start windowed in VR", &windowed)) render_size::SetForceWindowed(windowed);
+  Help("Overrides the game's fullscreen setting while VR runs, with a window that fits the screen:\n"
+       "the VR resolution only applies to a window. The game's own config is left as it is.");
+  bool noVSync = render_size::DisableVSync();
+  if (ImGui::Checkbox("Disable vsync in VR", &noVSync)) render_size::SetDisableVSync(noVSync);
+  Help("The headset sets the pace; with vsync the monitor's refresh rate (e.g. 60 Hz) would cap it.");
 }
 
 void Build() {

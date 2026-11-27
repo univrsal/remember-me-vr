@@ -33,6 +33,10 @@ class Game {
   // viewport don't exist yet: the point to hook code that sizes them.
   virtual void OnDirect3DCreated() {}
 
+  // Before IDirect3D9::CreateDevice and IDirect3DDevice9::Reset: may change
+  // the game's presentation parameters (e.g. the present interval).
+  virtual void AdjustPresentParameters(D3DPRESENT_PARAMETERS& params) { (void)params; }
+
   // After IDirect3D9::CreateDevice succeeded. `dxvk` is null when not on DXVK.
   // By now the game's code is unpacked (SteamStub has run), so this is the
   // first safe point to hook game code.

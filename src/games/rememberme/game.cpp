@@ -59,8 +59,10 @@ class RememberMe final : public vrcore::Game {
     vr.appName = "Remember Me VR";
     // Render at the headset's resolution whatever the window size (stereo only;
     // needs the engine hooks).
-    rm::render_size::Configure(config, vrEnabled_ && vr.mode == vrcore::Compositor::Mode::Stereo &&
-                                           config.GetBool("Stereo", "EngineHooks", true));
+    rm::render_size::Configure(config,
+                               vrEnabled_ && vr.mode == vrcore::Compositor::Mode::Stereo &&
+                                   config.GetBool("Stereo", "EngineHooks", true),
+                               vrEnabled_);
     vr.windowSizeHint = !rm::render_size::Requested();
     compositor_.Configure(vr);
     // Stereo frames from the game's scene image (internal, e.g. supersampled,
@@ -101,6 +103,10 @@ class RememberMe final : public vrcore::Game {
   void OnDirect3DCreated() override { rm::render_size::Install(knownBuild_); }
 
   bool LetterboxPresent() const override { return rm::render_size::Managed(); }
+
+  void AdjustPresentParameters(D3DPRESENT_PARAMETERS& params) override {
+    rm::render_size::AdjustPresentParameters(params);
+  }
 
   void OnDeviceCreated(IDirect3DDevice9* device, const D3DPRESENT_PARAMETERS& params,
                        const vrcore::DxvkInterop* dxvk) override {

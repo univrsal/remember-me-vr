@@ -33,7 +33,22 @@ std::atomic<uint32_t> g_outWidth{0}, g_outHeight{0};
 std::atomic<HWND> g_window{nullptr};
 std::atomic<bool> g_resizePosted{false};
 
+bool g_vr = false;
+std::atomic<bool> g_forceWindowed{true};
+std::atomic<bool> g_disableVSync{true};
+
+// The window settings as the game loaded them and as the mod replaced them
+// (game thread: loaded once in UGameEngine::Init, saved by the game menu).
+struct WindowPatch {
+  bool active = false;
+  int32_t fullscreen = 0, width = 0, height = 0;                  // the mod's
+  int32_t origFullscreen = 0, origWidth = 0, origHeight = 0;     // the player's
+};
+WindowPatch g_patch;
+
 UpdateViewportRhiFn g_origUpdate = nullptr;
+GfxSettingsFn g_origGfxLoad = nullptr;
+GfxSettingsFn g_origGfxSave = nullptr;
 ViewportMouseAxisFn g_origMouseX = nullptr;
 ViewportMouseAxisFn g_origMouseY = nullptr;
 ViewportMousePosFn g_origMousePos = nullptr;
@@ -179,6 +194,93 @@ void RequestResize(const char* why) {
   }
 }
 
+// --- Game window (ForceWindowed) ---------------------------------------------
+
+int32_t& SettingsField(void* settings, uint32_t offset) {
+  return *reinterpret_cast<int32_t*>(static_cast<char*>(settings) + offset);
+}
+
+// A window at the render aspect taking ~3/4 of the primary monitor's work area.
+void ComfortableWindow(int32_t& width, int32_t& height) {
+  RECT work{0, 0, 1280, 720};
+  SystemParametersInfoW(SPI_GETWORKAREA, 0, &work, 0);
+  uint32_t tw = 0, th = 0;
+  if (!Target(tw, th)) {
+    tw = 16;
+    th = 9;
+  }
+  const RECT r = vrcore::FitRect(static_cast<LONG>(tw), static_cast<LONG>(th), (work.right - work.left) * 3 / 4,
+                                 (work.bottom - work.top) * 3 / 4);
+  width = std::max<int32_t>(320, (r.right - r.left) & ~1);
+  height = std::max<int32_t>(180, r.bottom - r.top);
+}
+
+// True if a client area of `width` x `height` (plus a title bar and borders)
+// fits the work area.
+bool FitsScreen(int32_t width, int32_t height) {
+  RECT work{0, 0, 0, 0};
+  if (!SystemParametersInfoW(SPI_GETWORKAREA, 0, &work, 0)) return true;
+  RECT frame{0, 0, width, height};
+  AdjustWindowRect(&frame, WS_OVERLAPPEDWINDOW, FALSE);
+  return width > 0 && height > 0 && frame.right - frame.left <= work.right - work.left &&
+         frame.bottom - frame.top <= work.bottom - work.top;
+}
+
+// After the game loaded ExampleAdriftGfxConfig.ini, before it creates its window.
+void __fastcall HookGfxLoad(void* settings, void* /*edx*/) {
+  g_origGfxLoad(settings);
+  if (!settings || !g_forceWindowed) return;
+  int32_t& fullscreen = SettingsField(settings, kGfxSettingsFullscreen);
+  int32_t& width = SettingsField(settings, kGfxSettingsResWinWidth);
+  int32_t& height = SettingsField(settings, kGfxSettingsResWinHeight);
+  const bool wasFullscreen = fullscreen != 0;
+  if (!wasFullscreen && FitsScreen(width, height)) {
+    VR_LOG_INFO("game window: %dx%d windowed, as configured", width, height);
+    return;
+  }
+  g_patch.origFullscreen = fullscreen;
+  g_patch.origWidth = width;
+  g_patch.origHeight = height;
+  int32_t w = 0, h = 0;
+  ComfortableWindow(w, h);
+  fullscreen = 0;
+  width = w;
+  height = h;
+  g_patch.fullscreen = 0;
+  g_patch.width = w;
+  g_patch.height = h;
+  g_patch.active = true;
+  char was[64] = "fullscreen";
+  if (!wasFullscreen) {
+    std::snprintf(was, sizeof(was), "%dx%d doesn't fit the screen", g_patch.origWidth, g_patch.origHeight);
+  }
+  VR_LOG_INFO("game window: %s -> %dx%d windowed (the VR render size needs a window; [VR] ForceWindowed). The "
+              "game's config keeps its own values",
+              was, w, h);
+}
+
+// The game saves its gfx config (at startup when it filled in sizes, or from
+// its graphics menu): write the player's values where the mod's are still in place.
+void __fastcall HookGfxSave(void* settings, void* /*edx*/) {
+  if (!settings || !g_patch.active) {
+    g_origGfxSave(settings);
+    return;
+  }
+  int32_t& fullscreen = SettingsField(settings, kGfxSettingsFullscreen);
+  int32_t& width = SettingsField(settings, kGfxSettingsResWinWidth);
+  int32_t& height = SettingsField(settings, kGfxSettingsResWinHeight);
+  const int32_t f = fullscreen, w = width, h = height;
+  if (f == g_patch.fullscreen) fullscreen = g_patch.origFullscreen;
+  if (w == g_patch.width && h == g_patch.height) {
+    width = g_patch.origWidth;
+    height = g_patch.origHeight;
+  }
+  g_origGfxSave(settings);
+  fullscreen = f;
+  width = w;
+  height = h;
+}
+
 bool CheckPrologue(uint32_t va, const uint8_t* bytes, size_t size, const char* name) {
   if (vrcore::mem::Matches(reinterpret_cast<uintptr_t>(vrcore::Exe().FromPreferredVA(va)), bytes, size)) return true;
   VR_LOG_ERROR("render size: %s prologue doesn't match this build; window-sized rendering", name);
@@ -194,8 +296,11 @@ bool Hook(const char* name, uint32_t va, Detour detour, Fn* original) {
 
 }  // namespace
 
-void Configure(const vrcore::Config& config, bool enabled) {
+void Configure(const vrcore::Config& config, bool enabled, bool vr) {
   g_enabled = enabled;
+  g_vr = vr;
+  g_forceWindowed = config.GetBool("VR", "ForceWindowed", true);
+  g_disableVSync = config.GetBool("VR", "DisableVSync", true);
   const std::string size = config.GetString("VR", "RenderSize", "auto");
   unsigned w = 0, h = 0;
   if (size == "window") {
@@ -250,6 +355,19 @@ void Install(bool knownBuild) {
                 Hook("GetMousePos", kViewportGetMousePos, &HookMousePos, &g_origMousePos) &&
                 Hook("SetMouse", kViewportSetMouse, &HookSetMouse, &g_origSetMouse) &&
                 Hook("UpdateViewportRHI", kUpdateViewportRhi, &HookUpdateViewportRhi, &g_origUpdate);
+  // The game window: windowed, at a size that fits (before UGameEngine::Init loads the settings).
+  if (g_installed && g_forceWindowed) {
+    const bool ok =
+        CheckPrologue(kGfxSettingsLoad, kGfxSettingsLoadPrologueA, sizeof(kGfxSettingsLoadPrologueA), "gfx load") &&
+        CheckPrologue(kGfxSettingsLoad + kGfxSettingsLoadPrologueBOffset, kGfxSettingsLoadPrologueB,
+                      sizeof(kGfxSettingsLoadPrologueB), "gfx load") &&
+        CheckPrologue(kGfxSettingsSave, kGfxSettingsSavePrologueA, sizeof(kGfxSettingsSavePrologueA), "gfx save") &&
+        CheckPrologue(kGfxSettingsSave + kGfxSettingsSavePrologueBOffset, kGfxSettingsSavePrologueB,
+                      sizeof(kGfxSettingsSavePrologueB), "gfx save") &&
+        Hook("gfx settings save", kGfxSettingsSave, &HookGfxSave, &g_origGfxSave) &&
+        Hook("gfx settings load", kGfxSettingsLoad, &HookGfxLoad, &g_origGfxLoad);
+    if (!ok) VR_LOG_WARN("game window: hooks failed; the game's fullscreen/window settings apply");
+  }
   uint32_t w = 0, h = 0;
   if (!Target(w, h)) {
     VR_LOG_INFO("render size hooks %s; size not known yet", g_installed ? "installed" : "FAILED");
@@ -259,6 +377,27 @@ void Install(bool knownBuild) {
   } else {
     VR_LOG_INFO("render size hooks %s; %ux%u (RenderSize)", g_installed ? "installed" : "FAILED", w, h);
   }
+}
+
+bool ForceWindowed() { return g_forceWindowed; }
+void SetForceWindowed(bool on) { g_forceWindowed = on; }
+bool DisableVSync() { return g_disableVSync; }
+void SetDisableVSync(bool on) { g_disableVSync = on; }
+
+void Save(const vrcore::Config& config) {
+  config.SetBool("VR", "ForceWindowed", g_forceWindowed);
+  config.SetBool("VR", "DisableVSync", g_disableVSync);
+}
+
+void AdjustPresentParameters(D3DPRESENT_PARAMETERS& params) {
+  if (!g_vr || !g_disableVSync || params.PresentationInterval == D3DPRESENT_INTERVAL_IMMEDIATE) return;
+  static bool logged = false;
+  if (!logged) {
+    logged = true;
+    VR_LOG_INFO("vsync off while VR runs (game asked for present interval 0x%lx; [VR] DisableVSync)",
+                static_cast<unsigned long>(params.PresentationInterval));
+  }
+  params.PresentationInterval = D3DPRESENT_INTERVAL_IMMEDIATE;
 }
 
 void OnEyeSize(uint32_t eyeWidth, uint32_t eyeHeight) {

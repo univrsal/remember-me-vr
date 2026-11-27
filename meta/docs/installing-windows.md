@@ -17,7 +17,7 @@ The mod was developed and tested on Linux under Proton. The Windows install foll
    ```
 2. Copy DXVK's 32-bit `d3d9.dll` to `Binaries/Win32/`.
 3. Start your OpenXR runtime (SteamVR), then launch the game.
-4. Make sure the game runs windowed with `SuperSampleCount=1`; the window can be any size: see [configuration.md](configuration.md#resolution-and-window-size).
+4. No graphics settings needed: in VR the mod starts the game windowed, at the headset's resolution, without vsync (see [configuration.md](configuration.md#resolution-and-window-size)). Keep the game's `SuperSampleCount` at 1 (its default).
 
 The log is `Binaries/Win32/RememberMeVR.log`. `[Core] Enabled=0` in the INI turns the mod into a plain pass-through.
 

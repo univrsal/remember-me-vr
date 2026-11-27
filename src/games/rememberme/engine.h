@@ -97,10 +97,32 @@ constexpr uint32_t kUpdateViewportRhi = 0x006CBA70;
 constexpr uint8_t kUpdateViewportRhiPrologueA[] = {0x6A, 0xFF, 0x68};
 constexpr uint32_t kUpdateViewportRhiPrologueBOffset = 7;
 constexpr uint8_t kUpdateViewportRhiPrologueB[] = {0x64, 0xA1, 0x00, 0x00, 0x00, 0x00, 0x50, 0x83, 0xEC, 0x0C};
-// Gfx settings object (pointer): ResWinWidth +0x84, ResWinHeight +0x8C,
-// SuperSampleCount +0x94 (ExampleAdriftGfxConfig.ini, read in 0x00D1D6F0).
+// Gfx settings object (pointer): ExampleAdriftGfxConfig.ini's [Rendering]
+// (field order from the saver 0x0047BBC0): ResWidth +0x80, ResWinWidth +0x84,
+// ResHeight +0x88, ResWinHeight +0x8C, RefreshRate +0x90, SuperSampleCount
+// +0x94, AntiAliasing +0x98, EffectQuality +0x9C, TextureQuality +0xA0,
+// ShadowQuality +0xA4, Fullscreen +0xA8, VSync +0xAC, Gamma +0xB0, Version +0xB4.
 constexpr uint32_t kGfxSettings = 0x01606BD8;
+constexpr uint32_t kGfxSettingsResWinWidth = 0x84;
+constexpr uint32_t kGfxSettingsResWinHeight = 0x8C;
 constexpr uint32_t kGfxSettingsSuperSampleCount = 0x94;
+constexpr uint32_t kGfxSettingsFullscreen = 0xA8;
+// Load (defaults from DefaultAdriftGfxConfig into +0x48, then the user's file
+// into +0x80; without one, the defaults are copied and saved) and save,
+// both __fastcall(settings). UGameEngine::Init (0x00751D80) loads once, fills
+// missing sizes (window: 1280x720, fullscreen: the desktop), saves if it had
+// to, then creates the game window from Fullscreen and ResWin*/Res*.
+using GfxSettingsFn = void(__attribute__((thiscall)) *)(void* settings);
+constexpr uint32_t kGfxSettingsLoad = 0x0047E920;
+// push ebx; push imm32 (relocated); then mov ebx,ecx; call.
+constexpr uint8_t kGfxSettingsLoadPrologueA[] = {0x53, 0x68};
+constexpr uint32_t kGfxSettingsLoadPrologueBOffset = 6;
+constexpr uint8_t kGfxSettingsLoadPrologueB[] = {0x8B, 0xD9, 0xE8};
+constexpr uint32_t kGfxSettingsSave = 0x0047BBC0;
+// Bytes 3..6 are a relocatable SEH handler address.
+constexpr uint8_t kGfxSettingsSavePrologueA[] = {0x6A, 0xFF, 0x68};
+constexpr uint32_t kGfxSettingsSavePrologueBOffset = 7;
+constexpr uint8_t kGfxSettingsSavePrologueB[] = {0x64, 0xA1, 0x00, 0x00, 0x00, 0x00, 0x50, 0x81, 0xEC, 0x10, 0x08};
 // FViewport (UWindowsViewport+0x4) +0x64: the window (UWindowsViewport+0x68).
 constexpr uint32_t kViewportWindow = 0x64;
 // UWindowsViewport mouse position, all __thiscall on the FViewport, in window

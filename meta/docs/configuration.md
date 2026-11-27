@@ -17,6 +17,7 @@ Values are Windows virtual-key codes (`0x77` = F8); `0` disables a key.
 
 - `Mode`: `stereo` (default) or `screen` (the game on a flat virtual screen).
 - `RenderSize`, `RenderScale`: the resolution the game renders at in stereo, independent of the window (see [Resolution and window size](#resolution-and-window-size)).
+- `ForceWindowed`, `DisableVSync` (both on by default; also in the menu's Display tab, applied at the next start): start the game in a window that fits the screen, and without vsync, whatever the game's own graphics settings say.
 - `StereoSource`: `scene` (the game's internal scene image; recommended) or `backbuffer`.
 - `WorldScale`: Unreal units per metre of head movement. Larger = you feel smaller.
 - `CameraOrientation`: `yaw` keeps the horizon level (game camera pitch/roll ignored); `full` follows the game camera.
@@ -49,7 +50,9 @@ In stereo mode the game renders both eyes side by side at `[VR] RenderSize`, wha
 
 The window just shows that image scaled to fit (letterboxed), so pick any window size that fits your monitor. The mouse is mapped to match. If no headset is found when the game starts, it renders at the window size until the VR session starts, then switches.
 
-This needs windowed mode (fullscreen always renders at the display mode). The game ignores launch options for its window; edit its graphics config:
+The render size only applies to a window (fullscreen renders at the display mode), so with `[VR] ForceWindowed=1` (default) the mod starts the game windowed. That happens if the game is set to fullscreen (its default) or to a window larger than the screen, using a window at the render aspect about 3/4 of the screen's size. The game's own graphics config isn't changed: when the game saves it, the mod writes back your own fullscreen and window settings. `[VR] DisableVSync=1` (default) presents without vsync while VR runs, since the headset paces the game.
+
+So a fresh game install needs no graphics settings changes. To pick the window yourself, set `ForceWindowed=0` and edit the game's graphics config (it ignores launch options):
 
 - Linux: `~/.local/share/Steam/steamapps/compatdata/228300/pfx/drive_c/users/steamuser/Documents/My Games/UnrealEngine3/RememberMeGame/Config/ExampleAdriftGfxConfig.ini`
 - Windows: `Documents\My Games\UnrealEngine3\RememberMeGame\Config\ExampleAdriftGfxConfig.ini`
@@ -60,6 +63,7 @@ ResWinWidth=1600      ; any size; the VR resolution comes from RenderSize
 ResWinHeight=900
 SuperSampleCount=1    ; keep at 1 with RenderSize (2 would halve the UI resolution)
 Fullscreen=false
+VSync=false
 ```
 
 The in-game graphics menu may rewrite this file. More in [05-toolchain.md](05-toolchain.md).
