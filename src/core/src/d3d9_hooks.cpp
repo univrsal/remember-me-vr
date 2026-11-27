@@ -45,10 +45,16 @@ uint64_t g_presentCount = 0;
 // Letterboxing (Game::LetterboxPresent): when the game presents its whole
 // backbuffer into a window of another aspect ratio, a destination rect that
 // fits it centred. False: present as the game asked.
-bool LetterboxRect(IDirect3DSwapChain9* swapchain, HWND wnd, RECT& out) {
-  if (!GetGame().LetterboxPresent()) return false;
+// `src` may be null or cover the whole backbuffer (UE3's D3D9 RHI passes
+// {0, 0, width, height} in windowed mode); `dst` must be null.
+bool LetterboxRect(IDirect3DSwapChain9* swapchain, const RECT* src, const RECT* dst, HWND wnd, RECT& out) {
+  if (dst || !GetGame().LetterboxPresent()) return false;
   D3DPRESENT_PARAMETERS pp{};
   if (!swapchain || FAILED(swapchain->GetPresentParameters(&pp)) || !pp.Windowed) return false;
+  if (src && (src->left != 0 || src->top != 0 || src->right != static_cast<LONG>(pp.BackBufferWidth) ||
+              src->bottom != static_cast<LONG>(pp.BackBufferHeight))) {
+    return false;
+  }
   HWND window = wnd ? wnd : pp.hDeviceWindow;
   if (!window) {
     IDirect3DDevice9* device = nullptr;
@@ -86,10 +92,10 @@ HRESULT STDMETHODCALLTYPE HookPresent(IDirect3DDevice9* self, const RECT* src, c
   scene_tap::detail::BeforePresent(self);
   NotifyPresent(self, "IDirect3DDevice9::Present");
   RECT fit{};
-  if (!src && !dst) {
+  if (!dst) {
     IDirect3DSwapChain9* swapchain = nullptr;
     if (SUCCEEDED(self->GetSwapChain(0, &swapchain)) && swapchain) {
-      if (LetterboxRect(swapchain, wnd, fit)) {
+      if (LetterboxRect(swapchain, src, dst, wnd, fit)) {
         dst = &fit;
         LogLetterbox(fit);
       }
@@ -113,7 +119,7 @@ HRESULT STDMETHODCALLTYPE HookSwapChainPresent(IDirect3DSwapChain9* self, const 
     device->Release();
   }
   RECT fit{};
-  if (!src && !dst && LetterboxRect(self, wnd, fit)) {
+  if (LetterboxRect(self, src, dst, wnd, fit)) {
     dst = &fit;
     LogLetterbox(fit);
   }
