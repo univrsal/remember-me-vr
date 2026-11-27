@@ -11,7 +11,10 @@ namespace rm::startup {
 // movie player plays from script: BIK_Boot_* and StartUpMovie jump to their
 // last frame right after BinkOpen (refusing the open crashes the game).
 // Every movie opened is logged (first 40). Story cutscenes are unaffected.
-// [Game] SkipIntroMovies. Call Configure from Game::OnAttach.
+// [Game] SkipIntroMovies.
+// Also adds UE3's -HIGHRES, which stops the engine clamping the windowed
+// size to the desktop, so a window (and with it the render size) can exceed
+// the monitor. [Game] AllowOversizedWindow. Call Configure from Game::OnAttach.
 void Configure(const vrcore::Config& config);
 // If binkw32.dll wasn't loaded at attach time (e.g. from OnDeviceCreated).
 void InstallLate();

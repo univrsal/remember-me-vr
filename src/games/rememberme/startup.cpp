@@ -13,8 +13,6 @@
 namespace rm::startup {
 namespace {
 
-constexpr wchar_t kSwitch[] = L" -nostartupmovies";
-
 using GetCommandLineW_t = LPWSTR(WINAPI*)();
 using GetCommandLineA_t = LPSTR(WINAPI*)();
 GetCommandLineW_t g_origW = nullptr;
@@ -22,12 +20,12 @@ GetCommandLineA_t g_origA = nullptr;
 std::wstring g_lineW;
 std::string g_lineA;
 
-// Built in DllMain (loader lock: no other threads run the exe's code yet).
-void Build() {
-  g_lineW = g_origW();
-  g_lineA = g_origA();
-  if (g_lineW.find(L"nostartupmovies") == std::wstring::npos) g_lineW += kSwitch;
-  if (g_lineA.find("nostartupmovies") == std::string::npos) g_lineA += " -nostartupmovies";
+// Appends " -<name>" unless the line already has it (names are ASCII).
+void AddSwitch(const char* name) {
+  const std::string n = name;
+  const std::wstring wn(n.begin(), n.end());
+  if (g_lineW.find(wn) == std::wstring::npos) g_lineW += L" -" + wn;
+  if (g_lineA.find(n) == std::string::npos) g_lineA += " -" + n;
 }
 
 LPWSTR WINAPI HookW() { return g_lineW.data(); }
@@ -102,22 +100,29 @@ bool g_binkTried = false;
 }  // namespace
 
 void Configure(const vrcore::Config& config) {
-  if (!config.GetBool("Game", "SkipIntroMovies", true)) return;
-  g_skip = true;
+  g_skip = config.GetBool("Game", "SkipIntroMovies", true);
+  const bool highRes = config.GetBool("Game", "AllowOversizedWindow", true);
+  if (!g_skip && !highRes) return;
   // binkw32 is one of the exe's imports, normally mapped by now; else later (InstallLate).
-  g_binkTried = HookBink();
+  if (g_skip) g_binkTried = HookBink();
   HMODULE kernel32 = GetModuleHandleW(L"kernel32.dll");
   auto w = kernel32 ? reinterpret_cast<void*>(GetProcAddress(kernel32, "GetCommandLineW")) : nullptr;
   auto a = kernel32 ? reinterpret_cast<void*>(GetProcAddress(kernel32, "GetCommandLineA")) : nullptr;
   if (!w || !a) return;
   g_origW = reinterpret_cast<GetCommandLineW_t>(w);
   g_origA = reinterpret_cast<GetCommandLineA_t>(a);
-  Build();
+  // Built in DllMain (loader lock: no other threads run the exe's code yet).
+  g_lineW = g_origW();
+  g_lineA = g_origA();
+  if (g_skip) AddSwitch("nostartupmovies");
+  // UE3's -HIGHRES: windowed sizes are no longer clamped to the desktop.
+  if (highRes) AddSwitch("highres");
   const bool ok = vrcore::hook::Install("GetCommandLineW", w, reinterpret_cast<void*>(&HookW),
                                         reinterpret_cast<void**>(&g_origW)) &&
                   vrcore::hook::Install("GetCommandLineA", a, reinterpret_cast<void*>(&HookA),
                                         reinterpret_cast<void**>(&g_origA));
-  VR_LOG_INFO("intro movies: %s", ok ? "skipped (-nostartupmovies)" : "hook FAILED, playing");
+  VR_LOG_INFO("command line: %s%s%s", ok ? "added" : "hook FAILED:", g_skip ? " -nostartupmovies" : "",
+              highRes ? " -highres (window not clamped to the desktop)" : "");
 }
 
 void InstallLate() {
