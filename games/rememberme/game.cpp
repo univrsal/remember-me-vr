@@ -119,6 +119,7 @@ class RememberMe final : public vrcore::Game {
           }
         }
       }
+      rm::vr_gamepad::InstallEventTrace(&FullNameOf);
       if (ue3DumpOnStart_) DumpObjects("start");
     }
   }
@@ -197,6 +198,9 @@ class RememberMe final : public vrcore::Game {
   bool dumpKeyDown_ = false;
   vrcore::ue3::Reflection reflection_;
   static inline RememberMe* instance_ = nullptr;
+  static std::string FullNameOf(uintptr_t object) {
+    return instance_ && instance_->reflection_.Valid() ? instance_->reflection_.FullName(object) : std::string();
+  }
   // FName text for the input trace ("" until reflection is mapped).
   static std::string NameOf(int32_t index) {
     return instance_ && instance_->reflection_.Valid() ? instance_->reflection_.Name(index) : std::string();

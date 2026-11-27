@@ -26,6 +26,10 @@ void Configure(const vrcore::Config& config, vrcore::Compositor* compositor);
 // viewport client and whether the client consumed them. `nameOf` turns an
 // FName index into text. Known build only.
 void InstallInputTrace(std::string (*nameOf)(int32_t index));
+// Diagnostics: hooks UObject::ProcessEvent and logs script events whose name
+// suggests controller / binding / pause handling, with their first
+// parameters. `fullName` gives an object's "Function Pkg.Class.Name".
+void InstallEventTrace(std::string (*fullName)(uintptr_t object));
 // early: from DllMain (xinput1_3 must already be loaded, no LoadLibrary);
 // otherwise loads it if needed. Installs once.
 void Install(bool early = false);

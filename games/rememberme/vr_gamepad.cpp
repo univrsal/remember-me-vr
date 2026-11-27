@@ -4,11 +4,13 @@
 #include <xinput.h>
 
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
 #include <mutex>
 #include <string>
+#include <unordered_map>
 
 #include "engine.h"
 #include "vrcore/hook.h"
@@ -102,7 +104,7 @@ std::string KeyName(int32_t index, int32_t number) {
 int __fastcall HookInputKey(void* self, void* edx, void* viewport, int32_t controllerId, int32_t name, int32_t number,
                             int32_t event, float amount, int32_t gamepad) {
   const int r = g_origInputKey(self, edx, viewport, controllerId, name, number, event, amount, gamepad);
-  if (g_keyLogs < 400) {
+  if (event != 2 && g_keyLogs < 400) {  // skip auto-repeat (IE_Repeat)
     ++g_keyLogs;
     VR_LOG_INFO("input trace: key %s event %d controller %d gamepad %d -> %s", KeyName(name, number).c_str(), event,
                 controllerId, gamepad, r ? "consumed" : "not consumed");
@@ -139,6 +141,55 @@ int __fastcall HookProcessController(void* viewport, void* edx, uint32_t deltaTi
     VR_LOG_INFO("input trace: viewport client %p hooks %s", client, ok ? "installed" : "FAILED");
   }
   return g_origProcess(viewport, edx, deltaTime, index, s0, s1, s2, s3, s4);
+}
+
+// --- Script event trace (diagnostics) ------------------------------------
+// UObject::ProcessEvent(UFunction*, void* parms, void* result), thiscall.
+constexpr uint32_t kProcessEventVA = 0x00458BA0;
+constexpr uint8_t kProcessEventPrologue[] = {0x55, 0x8B, 0xEC, 0x6A, 0xFF, 0x68, 0x08, 0x42, 0x15, 0x01};
+using ProcessEventFn = void(__fastcall*)(void*, void*, void*, void*, void*);
+ProcessEventFn g_origProcessEvent = nullptr;
+std::string (*g_fullName)(uintptr_t) = nullptr;
+std::mutex g_eventMutex;
+struct EventInfo {
+  bool traced = false;
+  int logged = 0;
+  std::string name;
+};
+std::unordered_map<void*, EventInfo> g_events;
+
+bool IsTracedEvent(const std::string& fullName) {
+  const size_t dot = fullName.rfind('.');
+  std::string n = dot == std::string::npos ? fullName : fullName.substr(dot + 1);
+  for (char& c : n) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+  static const char* const kWords[] = {"controllerchange", "gamepad", "binding", "pad", "joy", "device",
+                                       "inputtype", "connected", "unpause", "pausemenu", "focus", "controllertype",
+                                       "inputmode", "usingmouse", "keyboard"};
+  for (const char* w : kWords) {
+    if (n.find(w) != std::string::npos) return true;
+  }
+  return false;
+}
+
+void __fastcall HookProcessEvent(void* self, void* edx, void* function, void* parms, void* result) {
+  if (function && g_fullName) {
+    std::lock_guard<std::mutex> lock(g_eventMutex);
+    auto it = g_events.find(function);
+    if (it == g_events.end()) {
+      EventInfo info;
+      info.name = g_fullName(reinterpret_cast<uintptr_t>(function));
+      info.traced = !info.name.empty() && IsTracedEvent(info.name);
+      it = g_events.emplace(function, std::move(info)).first;
+    }
+    if (it->second.traced && it->second.logged < 30) {
+      ++it->second.logged;
+      uint32_t p[4] = {};
+      if (parms) vrcore::mem::Read(reinterpret_cast<uintptr_t>(parms), p);
+      VR_LOG_INFO("event trace: %s on %s parms %08x %08x %08x %08x", it->second.name.c_str(),
+                  g_fullName(reinterpret_cast<uintptr_t>(self)).c_str(), p[0], p[1], p[2], p[3]);
+    }
+  }
+  g_origProcessEvent(self, edx, function, parms, result);
 }
 
 // Diagnostics (sticks ignored without a real gamepad): the game's joystick
@@ -347,6 +398,19 @@ void InstallInputTrace(std::string (*nameOf)(int32_t index)) {
   const bool ok = vrcore::hook::Install("ProcessController", fn, reinterpret_cast<void*>(&HookProcessController),
                                         reinterpret_cast<void**>(&g_origProcess));
   VR_LOG_INFO("input trace %s", ok ? "installed" : "FAILED");
+}
+
+void InstallEventTrace(std::string (*fullName)(uintptr_t object)) {
+  g_fullName = fullName;
+  if (g_origProcessEvent) return;
+  void* fn = vrcore::Exe().FromPreferredVA(kProcessEventVA);
+  if (!vrcore::mem::Matches(reinterpret_cast<uintptr_t>(fn), kProcessEventPrologue, sizeof(kProcessEventPrologue))) {
+    VR_LOG_WARN("event trace: ProcessEvent prologue doesn't match this build");
+    return;
+  }
+  const bool ok = vrcore::hook::Install("ProcessEvent", fn, reinterpret_cast<void*>(&HookProcessEvent),
+                                        reinterpret_cast<void**>(&g_origProcessEvent));
+  VR_LOG_INFO("event trace %s", ok ? "installed" : "FAILED");
 }
 
 }  // namespace rm::vr_gamepad
