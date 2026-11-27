@@ -1,4 +1,4 @@
-A VR mod for *Remember Me* (DONTNOD, 2013; Unreal Engine 3, Direct3D 9, 32-bit). It plays the game in VR through OpenXR, built on a reusable D3D9 VR core.
+VR mod for Remember Me.
 
 ## Features
 
