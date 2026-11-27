@@ -85,6 +85,7 @@ class RememberMe final : public vrcore::Game {
       if (knownBuild_) {
         engineHooksInstalled_ = sceneViews_.Install();
         instance_ = this;
+        rm::vr_gamepad::InstallDeviceRegistration();
         rm::vr_gamepad::InstallInputTrace(&NameOf);
         // Stereo fixes at the D3D9 level (right-eye view offset) and the
         // per-eye diagnostics that trace through the same hooks.
@@ -119,7 +120,6 @@ class RememberMe final : public vrcore::Game {
           }
         }
       }
-      rm::vr_gamepad::InstallEventTrace(&FullNameOf);
       if (ue3DumpOnStart_) DumpObjects("start");
     }
   }

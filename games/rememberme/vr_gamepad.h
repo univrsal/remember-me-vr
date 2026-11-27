@@ -30,6 +30,14 @@ void InstallInputTrace(std::string (*nameOf)(int32_t index));
 // suggests controller / binding / pause handling, with their first
 // parameters. `fullName` gives an object's "Function Pkg.Class.Name".
 void InstallEventTrace(std::string (*fullName)(uintptr_t object));
+// Registers player 0's gamepad with the game's input device list. The game
+// only treats a controller as a gamepad for gameplay (stick axes, triggers)
+// once DirectInput enumeration found it and its WMI check said it is an
+// XInput device (UWindowsClient init and every WM_DEVICECHANGE); the VR
+// controllers exist only at the XInput level, so a virtual Xbox 360 pad is
+// fed to the game's enumeration callback whenever no XInput pad is
+// registered. Known build only; call once the exe is unpacked.
+void InstallDeviceRegistration();
 // early: from DllMain (xinput1_3 must already be loaded, no LoadLibrary);
 // otherwise loads it if needed. Installs once.
 void Install(bool early = false);
