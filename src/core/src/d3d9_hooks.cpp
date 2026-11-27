@@ -77,6 +77,7 @@ HRESULT STDMETHODCALLTYPE HookSwapChainPresent(IDirect3DSwapChain9* self, const 
 HRESULT STDMETHODCALLTYPE HookReset(IDirect3DDevice9* self, D3DPRESENT_PARAMETERS* params) {
   VR_LOG_INFO("Reset: %ux%u windowed=%d", params ? params->BackBufferWidth : 0,
               params ? params->BackBufferHeight : 0, params ? params->Windowed : -1);
+  if (params) GetGame().AdjustPresentParameters(*params);
   GetGame().OnBeforeReset(self);
   scene_tap::detail::BeforePresent(self);
   scene_tap::detail::EndFrame();
@@ -110,6 +111,7 @@ HRESULT STDMETHODCALLTYPE HookCreateDevice(IDirect3D9* self, UINT adapter, D3DDE
   VR_LOG_INFO("CreateDevice: adapter=%u type=%d flags=0x%08lx %ux%u fmt=%d windowed=%d", adapter, type, flags,
               params ? params->BackBufferWidth : 0, params ? params->BackBufferHeight : 0,
               params ? static_cast<int>(params->BackBufferFormat) : 0, params ? params->Windowed : -1);
+  if (params) GetGame().AdjustPresentParameters(*params);
   const HRESULT hr = g_origCreateDevice(self, adapter, type, focus, flags, params, out);
   if (FAILED(hr) || !out || !*out) {
     VR_LOG_ERROR("CreateDevice failed: 0x%08lx", hr);
