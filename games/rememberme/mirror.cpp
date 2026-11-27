@@ -33,6 +33,7 @@ void Configure(const vrcore::Config& config) {
 }
 
 View GetView() { return g_view; }
+void SetView(View view) { g_view = view; }
 
 void OnPresent(IDirect3DDevice9* device, bool vrStereoFrame) {
   if (!vrStereoFrame || g_view != View::Left) return;

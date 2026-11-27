@@ -20,6 +20,8 @@ struct ControllerState {
   bool padPress[2]{};   // Index: trackpad pressed hard
   bool menu[2]{};       // Touch / simple controller: menu button (left)
   float pad[2][2]{};    // trackpad position (Index), for D-pad directions
+  bool aimValid[2]{};   // aim pose tracked this sync
+  XrPosef aim[2]{};     // aim pose (pointing ray: -Z) in the LOCAL space, at the frame's display time
   uint32_t sequence = 0;  // incremented on every sync
 };
 
@@ -35,8 +37,8 @@ class Input {
   // Drops the handles (they die with the instance/session).
   void Reset();
   // After xrBeginFrame while the session runs: syncs actions, updates the
-  // state and applies pending haptics.
-  void Sync(Context& xr);
+  // state (aim poses located at `displayTime`) and applies pending haptics.
+  void Sync(Context& xr, XrTime displayTime);
 
   ControllerState State() const;
   // Rumble request, e.g. from XInputSetState (0..1 per hand); applied on Sync.
@@ -49,6 +51,8 @@ class Input {
   XrAction stick_ = XR_NULL_HANDLE, trigger_ = XR_NULL_HANDLE, grip_ = XR_NULL_HANDLE;
   XrAction primary_ = XR_NULL_HANDLE, secondary_ = XR_NULL_HANDLE, stickClick_ = XR_NULL_HANDLE;
   XrAction pad_ = XR_NULL_HANDLE, padForce_ = XR_NULL_HANDLE, menu_ = XR_NULL_HANDLE, haptic_ = XR_NULL_HANDLE;
+  XrAction aim_ = XR_NULL_HANDLE;
+  XrSpace aimSpace_[2] = {XR_NULL_HANDLE, XR_NULL_HANDLE};
 
   PFN_xrSyncActions syncActions_ = nullptr;
   PFN_xrGetActionStateBoolean getBool_ = nullptr;

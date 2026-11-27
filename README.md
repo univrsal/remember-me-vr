@@ -39,7 +39,7 @@ The following are gitignored and stay local: `re/` (the unpacked exe, Ghidra pro
 
 ## Building (Linux)
 
-Requirements: `mingw-w64-gcc` (i686), CMake ≥ 3.24, Ninja, git. Dependencies (MinHook, Vulkan-Headers) are fetched at configure time, pinned to tags.
+Requirements: `mingw-w64-gcc` (i686), CMake ≥ 3.24, Ninja, git. Dependencies (MinHook, Vulkan-Headers, OpenXR headers, Dear ImGui) are fetched at configure time, pinned to tags.
 
 ```sh
 cmake --preset mingw-i686-release        # or mingw-i686-debug

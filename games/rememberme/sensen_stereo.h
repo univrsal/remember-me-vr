@@ -45,4 +45,10 @@ void OnRendererViews(void* renderer);
 // Render thread, at Present.
 void EndFrame();
 
+// Hide the hints altogether (config menu; [Visibility] HideSensen). Needs the
+// draw hooks (Available(): VR on with StereoSource=scene and SensenStereo=1).
+void SetHidden(bool hidden);
+bool Hidden();
+bool Available();
+
 }  // namespace rm::sensen_stereo

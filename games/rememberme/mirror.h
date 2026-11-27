@@ -16,6 +16,7 @@ enum class View { Left, Stereo };
 
 void Configure(const vrcore::Config& config);
 View GetView();
+void SetView(View view);  // presenting thread (config menu)
 
 // Presenting thread, before Present: rearranges the backbuffer for a stereo
 // frame shown in VR.

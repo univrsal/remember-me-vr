@@ -1,5 +1,6 @@
 #include "vrcore/config.h"
 
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <iterator>
@@ -60,6 +61,28 @@ bool Config::GetBool(const char* section, const char* key, bool fallback) const 
     if (_stricmp(value.c_str(), f) == 0) return false;
   }
   return fallback;
+}
+
+bool Config::Set(const char* section, const char* key, const std::string& value) const {
+  if (path_.empty()) return false;
+  return WritePrivateProfileStringW(Widen(section).c_str(), Widen(key).c_str(), Widen(value.c_str()).c_str(),
+                                    path_.c_str()) != 0;
+}
+
+bool Config::SetInt(const char* section, const char* key, int value, bool hex) const {
+  char buf[32];
+  std::snprintf(buf, sizeof(buf), hex ? "0x%02X" : "%d", value);
+  return Set(section, key, buf);
+}
+
+bool Config::SetFloat(const char* section, const char* key, float value) const {
+  char buf[32];
+  std::snprintf(buf, sizeof(buf), "%g", value);
+  return Set(section, key, buf);
+}
+
+bool Config::SetBool(const char* section, const char* key, bool value) const {
+  return Set(section, key, value ? "1" : "0");
 }
 
 }  // namespace vrcore

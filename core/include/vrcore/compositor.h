@@ -43,6 +43,9 @@ class Compositor {
     float uiDistance = 1.6f;      // UI panel in stereo frames: metres in front of the recentred head
     float uiWidth = 1.3f;         // metres; height follows the UI texture aspect
     float uiHeight = 0.0f;        // vertical offset in metres (negative = lower)
+    float menuDistance = 1.2f;    // overlay menu: metres in front of the head when it opens
+    float menuWidth = 1.0f;       // metres; height follows the menu texture aspect
+    float menuHeight = -0.1f;     // vertical offset from eye height in metres
     int recenterKey = 0x77;       // virtual-key code (default F8); 0 = none
     const char* appName = "vrcore";
   };
@@ -52,6 +55,8 @@ class Compositor {
   Compositor& operator=(const Compositor&) = delete;
 
   void Configure(const Settings& settings) { settings_ = settings; }
+  // Presenting thread (e.g. an in-game menu drawn at Present): live changes.
+  Settings& MutableSettings() { return settings_; }
 
   // Presenting thread, before the original Present. Blocks in xrWaitFrame,
   // which paces the game to the headset while the session is running.
@@ -60,9 +65,16 @@ class Compositor {
   // (resolution independent of the window) when its size/format fit,
   // otherwise from the backbuffer.
   // `uiTexture` (optional, premultiplied alpha) is shown on a floating panel
-  // over the stereo scene.
+  // over the stereo scene. `menuTexture` (optional, premultiplied alpha) is an
+  // overlay menu on its own panel, placed in front of the head when it first
+  // appears and kept there while it's passed every frame (stereo and screen).
   void OnPresent(IDirect3DDevice9* device, IDirect3DTexture9* sceneTexture = nullptr,
-                 IDirect3DTexture9* uiTexture = nullptr);
+                 IDirect3DTexture9* uiTexture = nullptr, IDirect3DTexture9* menuTexture = nullptr);
+  // Recenters on the next frame (any thread).
+  void RequestRecenter() { recenterRequested_ = true; }
+  // Presenting thread: the menu panel's pose (LOCAL space, +Z toward the
+  // viewer) and size in metres, while it's shown.
+  bool MenuPanel(XrPosef& pose, XrExtent2Df& size) const;
   // Device reset/recreation: drops the swapchain (sizes may change).
   void OnDeviceChanged();
   // Tears down OpenXR + Vulkan objects. Only while the D3D9 device is alive;
@@ -105,6 +117,7 @@ class Compositor {
   bool CopyToSwapchain(const DxvkInterop& dxvk, IDirect3DSurface9* source, bool sourceIsBgra8, Swapchain& swapchain,
                        uint32_t width, uint32_t height);
   bool PopStereoFrame(StereoFrame& out);
+  void AnchorMenu(XrTime time);
 
   Settings settings_;
   xr::Context xr_;
@@ -119,6 +132,11 @@ class Compositor {
   Swapchain stereoSwapchain_{.name = "stereo"};
   Swapchain screenSwapchain_{.name = "screen"};
   Swapchain uiSwapchain_{.name = "ui"};
+  Swapchain menuSwapchain_{.name = "menu"};
+  bool menuAnchored_ = false;  // menu panel pose chosen (cleared when the menu closes or on recenter)
+  XrPosef menuPose_{};
+  XrExtent2Df menuSize_{};
+  std::atomic<bool> recenterRequested_{false};
   int sceneSourceLogged_ = -1;  // last logged stereo source (0 backbuffer, n = scene at n x)
 
   // Game thread -> presenting thread.

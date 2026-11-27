@@ -10,7 +10,7 @@
 #include <cstring>
 #include <mutex>
 
-#include "free_cam.h"
+#include "input_capture.h"
 #include "vrcore/hook.h"
 #include "vrcore/log.h"
 #include "vrcore/memory.h"
@@ -193,8 +193,8 @@ DWORD WINAPI HookGetState(DWORD user, XINPUT_STATE* state) {
   std::lock_guard<std::mutex> lock(g_mutex);
   result = Compose(result, state);
   if (result != ERROR_SUCCESS) return result;
-  // Free camera: the game gets a neutral pad (its sticks fly the camera).
-  if (rm::free_cam::SwallowPad(state->Gamepad)) state->Gamepad = XINPUT_GAMEPAD{};
+  // Menu / free camera: the game gets a neutral pad (the mod uses it).
+  if (rm::input_capture::SwallowPad(state->Gamepad)) state->Gamepad = XINPUT_GAMEPAD{};
   // Own packet numbers: they change whenever what the game sees changes.
   if (std::memcmp(&state->Gamepad, &g_last, sizeof(g_last)) != 0) {
     g_last = state->Gamepad;
@@ -234,8 +234,8 @@ bool ReadPad(XINPUT_GAMEPAD& pad) {
 }
 
 void Install(bool early) {
-  // Also without VR: the free camera reads the pad and hides it from the game.
-  if ((!VrActive() && !rm::free_cam::Enabled()) || g_origGetState) return;
+  // Always: the menu and free camera read the pad and hide it from the game.
+  if (g_origGetState) return;
   HMODULE xinput = GetModuleHandleW(L"xinput1_3.dll");
   if (!xinput && early) return;  // DllMain: no LoadLibrary; try again later
   if (!xinput) xinput = LoadLibraryW(L"xinput1_3.dll");
@@ -252,7 +252,7 @@ void Install(bool early) {
                   vrcore::hook::Install("XInputSetState", setState, reinterpret_cast<void*>(&HookSetState),
                                         reinterpret_cast<void**>(&g_origSetState));
   VR_LOG_INFO("vr gamepad %s%s", !ok ? "FAILED" : VrActive() ? "installed (VR controllers act as player 0's gamepad)"
-                                                              : "installed (free camera only)",
+                                                              : "installed (menu / free camera only)",
               early ? " at attach" : "");
 }
 

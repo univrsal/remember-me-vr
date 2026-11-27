@@ -34,7 +34,28 @@ FetchContent_Declare(openxr_sdk
   GIT_TAG        release-1.1.65
   GIT_SHALLOW    TRUE
   SOURCE_SUBDIR  _fetch_only)
-FetchContent_MakeAvailable(minhook vulkan_headers openxr_sdk)
+FetchContent_Declare(imgui
+  GIT_REPOSITORY https://github.com/ocornut/imgui.git
+  GIT_TAG        v1.91.9
+  GIT_SHALLOW    TRUE
+  SOURCE_SUBDIR  _fetch_only)
+FetchContent_MakeAvailable(minhook vulkan_headers openxr_sdk imgui)
+
+# Dear ImGui with its D3D9 renderer (the in-game config menu). Input comes from
+# the mod, not imgui's Win32 backend; no clipboard/IME/shell helpers, so the DLL
+# imports nothing new.
+add_library(imgui STATIC
+  ${imgui_SOURCE_DIR}/imgui.cpp
+  ${imgui_SOURCE_DIR}/imgui_draw.cpp
+  ${imgui_SOURCE_DIR}/imgui_tables.cpp
+  ${imgui_SOURCE_DIR}/imgui_widgets.cpp
+  ${imgui_SOURCE_DIR}/backends/imgui_impl_dx9.cpp)
+target_include_directories(imgui SYSTEM PUBLIC ${imgui_SOURCE_DIR} ${imgui_SOURCE_DIR}/backends)
+target_compile_definitions(imgui PUBLIC
+  IMGUI_DISABLE_WIN32_DEFAULT_CLIPBOARD_FUNCTIONS
+  IMGUI_DISABLE_WIN32_DEFAULT_IME_FUNCTIONS
+  IMGUI_DISABLE_DEFAULT_SHELL_FUNCTIONS
+  IMGUI_DISABLE_OBSOLETE_FUNCTIONS)
 
 add_library(minhook STATIC
   ${minhook_SOURCE_DIR}/src/buffer.c

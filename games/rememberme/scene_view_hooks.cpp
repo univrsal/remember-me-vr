@@ -10,6 +10,8 @@
 
 #include "engine.h"
 #include "free_cam.h"
+#include "hide_actors.h"
+#include "input_capture.h"
 #include "sensen_stereo.h"
 #include "vrcore/hook.h"
 #include "vrcore/log.h"
@@ -37,10 +39,11 @@ struct EyeOverride {
 struct State {
   vrcore::Compositor* compositor = nullptr;
   bool vrStereo = true;
-  float unitsPerMeter = 50.0f;
-  vrcore::ue3::BaseOrientation base = vrcore::ue3::BaseOrientation::YawOnly;
+  // Live settings (the config menu writes them on the render thread).
+  std::atomic<float> unitsPerMeter{50.0f};
+  std::atomic<vrcore::ue3::BaseOrientation> base{vrcore::ue3::BaseOrientation::YawOnly};
 
-  bool symmetricProjection = false;
+  std::atomic<bool> symmetricProjection{false};
   bool testFovOverride = false;
   XrFovf testFov[2]{};
 
@@ -75,9 +78,10 @@ struct State {
 
   // Render mono while one of these controller bools is set (loading screens,
   // menus).
-  bool flatLoadingScreens = true;
-  bool flatMenus = true;
+  std::atomic<bool> flatLoadingScreens{true};
+  std::atomic<bool> flatMenus{true};
   struct FlatFlag {
+    const std::atomic<bool>* enabled = nullptr;
     std::string name;
     int32_t offset = -1;
     uint32_t mask = 0;
@@ -193,7 +197,8 @@ bool FlatFrame(void* localPlayer) {
   bool any = false;
   for (auto& f : g.flatFlags) {
     uint32_t word = 0;
-    const bool set = vrcore::mem::Read(controller + static_cast<uint32_t>(f.offset), word) && (word & f.mask) != 0;
+    const bool set = f.enabled->load(std::memory_order_relaxed) &&
+                     vrcore::mem::Read(controller + static_cast<uint32_t>(f.offset), word) && (word & f.mask) != 0;
     if (set != f.was) {
       f.was = set;
       VR_LOG_INFO("%s %s: %s", f.name.c_str(), set ? "on" : "off", set ? "rendering mono (flat panel in VR)" : "done");
@@ -298,7 +303,7 @@ void* CalcSceneView(void* self, void* family, FVector* loc, FRotator* rot, void*
   // Once per rendered frame: free camera toggle and movement.
   if (!matricesOnly) {
     g.vrFrame = vr;
-    free_cam::InstallInputHooks(viewport);
+    input_capture::InstallInputHooks(viewport);
     free_cam::Update(vr, vr && g.haveHead ? &g.head : nullptr);
   }
 
@@ -374,12 +379,13 @@ void* CalcSceneView(void* self, void* family, FVector* loc, FRotator* rot, void*
       constexpr float kDeg = 57.29578f;
       VR_LOG_INFO("first VR stereo frame: eye L pos (%.3f, %.3f, %.3f) m, R pos (%.3f, %.3f, %.3f) m, %.0f uu/m",
                   frame.pose[0].position.x, frame.pose[0].position.y, frame.pose[0].position.z,
-                  frame.pose[1].position.x, frame.pose[1].position.y, frame.pose[1].position.z, g.unitsPerMeter);
+                  frame.pose[1].position.x, frame.pose[1].position.y, frame.pose[1].position.z,
+                  g.unitsPerMeter.load());
       VR_LOG_INFO("eye FOV (left,right,up,down deg): L %.1f,%.1f,%.1f,%.1f  R %.1f,%.1f,%.1f,%.1f%s",
                   frame.fov[0].angleLeft * kDeg, frame.fov[0].angleRight * kDeg, frame.fov[0].angleUp * kDeg,
                   frame.fov[0].angleDown * kDeg, frame.fov[1].angleLeft * kDeg, frame.fov[1].angleRight * kDeg,
                   frame.fov[1].angleUp * kDeg, frame.fov[1].angleDown * kDeg,
-                  g.symmetricProjection ? " (symmetric projection)" : "");
+                  g.symmetricProjection.load() ? " (symmetric projection)" : "");
     }
   }
   return view;
@@ -387,9 +393,17 @@ void* CalcSceneView(void* self, void* family, FVector* loc, FRotator* rot, void*
 
 void* __fastcall HookCalcSceneView(void* self, void* /*edx*/, void* family, FVector* loc, FRotator* rot,
                                    void* viewport, void* drawer, void* outProjection, void* outView) {
+  void* const caller = __builtin_return_address(0);
   ++g.inCalcSceneView;
-  void* view = CalcSceneView(self, family, loc, rot, viewport, drawer, outProjection, outView,
-                             __builtin_return_address(0));
+  void* view;
+  if (caller == g_mainCallReturn) {
+    // The rendered views only: screen-space checks (temporary families) still see everything.
+    hide_actors::Update(self);
+    hide_actors::Scope hidden(self);
+    view = CalcSceneView(self, family, loc, rot, viewport, drawer, outProjection, outView, caller);
+  } else {
+    view = CalcSceneView(self, family, loc, rot, viewport, drawer, outProjection, outView, caller);
+  }
   --g.inCalcSceneView;
   return view;
 }
@@ -466,9 +480,9 @@ bool SceneViewHooks::Install() {
                             reinterpret_cast<void**>(&g_origPovLookAt));
   VR_LOG_INFO("scene view hooks %s; VR stereo %s (world scale %.0f uu/m, camera orientation %s%s); side-by-side test "
               "%s (toggle key 0x%02x, %s FOV); right view state %s",
-              ok ? "installed" : "FAILED", g.vrStereo ? "on" : "off", g.unitsPerMeter,
-              g.base == vrcore::ue3::BaseOrientation::Full ? "full" : "yaw only",
-              g.symmetricProjection ? ", symmetric projection" : "", g.sideBySide ? "on" : "off", toggleKey_,
+              ok ? "installed" : "FAILED", g.vrStereo ? "on" : "off", g.unitsPerMeter.load(),
+              g.base.load() == vrcore::ue3::BaseOrientation::Full ? "full" : "yaw only",
+              g.symmetricProjection.load() ? ", symmetric projection" : "", g.sideBySide ? "on" : "off", toggleKey_,
               g.testFovOverride ? "headset-like" : "game",
               g.rightViewState == RightEyeViewState::Own      ? "own"
               : g.rightViewState == RightEyeViewState::Shared ? "shared"
@@ -476,13 +490,33 @@ bool SceneViewHooks::Install() {
   return ok;
 }
 
-void SceneViewHooks::AddFlatFlag(const char* name, int32_t offset, uint32_t mask) {
-  g.flatFlags.push_back({name, offset, mask, false});
-  VR_LOG_INFO("flat panel while %s (controller +0x%x mask 0x%x)", name, offset, mask);
+void SceneViewHooks::AddFlatFlag(const char* name, int32_t offset, uint32_t mask, bool menu) {
+  g.flatFlags.push_back({menu ? &g.flatMenus : &g.flatLoadingScreens, name, offset, mask, false});
+  VR_LOG_INFO("flat panel while %s (controller +0x%x mask 0x%x)%s", name, offset, mask,
+              (menu ? g.flatMenus : g.flatLoadingScreens).load() ? "" : ", off for now");
 }
 
 bool SceneViewHooks::FlatLoadingScreens() const { return g.flatLoadingScreens; }
 bool SceneViewHooks::FlatMenus() const { return g.flatMenus; }
+void SceneViewHooks::SetFlatLoadingScreens(bool on) { g.flatLoadingScreens = on; }
+void SceneViewHooks::SetFlatMenus(bool on) { g.flatMenus = on; }
+float SceneViewHooks::WorldScale() const { return g.unitsPerMeter; }
+void SceneViewHooks::SetWorldScale(float unitsPerMeter) { g.unitsPerMeter = std::clamp(unitsPerMeter, 5.0f, 500.0f); }
+bool SceneViewHooks::FullOrientation() const { return g.base.load() == vrcore::ue3::BaseOrientation::Full; }
+void SceneViewHooks::SetFullOrientation(bool full) {
+  g.base = full ? vrcore::ue3::BaseOrientation::Full : vrcore::ue3::BaseOrientation::YawOnly;
+}
+bool SceneViewHooks::SymmetricProjection() const { return g.symmetricProjection; }
+void SceneViewHooks::SetSymmetricProjection(bool on) { g.symmetricProjection = on; }
+bool SceneViewHooks::SideBySide() const { return g.sideBySide; }
+
+void SceneViewHooks::Save(const vrcore::Config& config) const {
+  config.SetFloat("VR", "WorldScale", g.unitsPerMeter);
+  config.Set("VR", "CameraOrientation", FullOrientation() ? "full" : "yaw");
+  config.SetBool("VR", "SymmetricProjection", g.symmetricProjection);
+  config.SetBool("VR", "FlatLoadingScreens", g.flatLoadingScreens);
+  config.SetBool("VR", "FlatMenus", g.flatMenus);
+}
 
 void SceneViewHooks::ToggleSideBySide() {
   const bool now = !g.sideBySide.load();

@@ -71,6 +71,7 @@ bool Input::Init(Context& xr) {
             make("pad", "Trackpad", XR_ACTION_TYPE_VECTOR2F_INPUT, pad_) &&
             make("pad_force", "Trackpad press", XR_ACTION_TYPE_FLOAT_INPUT, padForce_) &&
             make("menu", "Menu", XR_ACTION_TYPE_BOOLEAN_INPUT, menu_) &&
+            make("aim", "Aim", XR_ACTION_TYPE_POSE_INPUT, aim_) &&
             make("haptic", "Rumble", XR_ACTION_TYPE_VIBRATION_OUTPUT, haptic_);
   if (!ok) return false;
 
@@ -108,6 +109,8 @@ bool Input::Init(Context& xr) {
                   {pad_, "/user/hand/right/input/trackpad"},
                   {padForce_, "/user/hand/left/input/trackpad/force"},
                   {padForce_, "/user/hand/right/input/trackpad/force"},
+                  {aim_, "/user/hand/left/input/aim/pose"},
+                  {aim_, "/user/hand/right/input/aim/pose"},
                   {haptic_, "/user/hand/left/output/haptic"},
                   {haptic_, "/user/hand/right/output/haptic"}});
   suggestProfile("/interaction_profiles/oculus/touch_controller",
@@ -124,11 +127,15 @@ bool Input::Init(Context& xr) {
                   {stickClick_, "/user/hand/left/input/thumbstick/click"},
                   {stickClick_, "/user/hand/right/input/thumbstick/click"},
                   {menu_, "/user/hand/left/input/menu/click"},
+                  {aim_, "/user/hand/left/input/aim/pose"},
+                  {aim_, "/user/hand/right/input/aim/pose"},
                   {haptic_, "/user/hand/left/output/haptic"},
                   {haptic_, "/user/hand/right/output/haptic"}});
   suggestProfile("/interaction_profiles/khr/simple_controller",
                  {{primary_, "/user/hand/right/input/select/click"},
                   {menu_, "/user/hand/left/input/menu/click"},
+                  {aim_, "/user/hand/left/input/aim/pose"},
+                  {aim_, "/user/hand/right/input/aim/pose"},
                   {haptic_, "/user/hand/left/output/haptic"},
                   {haptic_, "/user/hand/right/output/haptic"}});
 
@@ -140,6 +147,16 @@ bool Input::Init(Context& xr) {
     VR_LOG_ERROR("xr input: xrAttachSessionActionSets failed: %s", ResultName(result));
     return false;
   }
+  // Aim poses (laser pointer): one action space per hand.
+  auto createActionSpace = xr.Proc<PFN_xrCreateActionSpace>("xrCreateActionSpace");
+  for (int h = 0; h < 2 && createActionSpace; ++h) {
+    XrActionSpaceCreateInfo spaceInfo{XR_TYPE_ACTION_SPACE_CREATE_INFO};
+    spaceInfo.action = aim_;
+    spaceInfo.subactionPath = hands_[h];
+    spaceInfo.poseInActionSpace.orientation.w = 1.0f;
+    const XrResult r = createActionSpace(xr.Session(), &spaceInfo, &aimSpace_[h]);
+    if (XR_FAILED(r)) VR_LOG_WARN("xr input: aim space for hand %d failed: %s", h, ResultName(r));
+  }
   initialized_ = true;
   VR_LOG_INFO("xr input: actions attached (Index, Touch, simple controller bindings)");
   return true;
@@ -148,14 +165,15 @@ bool Input::Init(Context& xr) {
 void Input::Reset() {
   initialized_ = false;
   set_ = XR_NULL_HANDLE;
-  stick_ = trigger_ = grip_ = primary_ = secondary_ = stickClick_ = pad_ = padForce_ = menu_ = haptic_ =
+  stick_ = trigger_ = grip_ = primary_ = secondary_ = stickClick_ = pad_ = padForce_ = menu_ = haptic_ = aim_ =
       XR_NULL_HANDLE;
+  aimSpace_[0] = aimSpace_[1] = XR_NULL_HANDLE;  // die with the session
   vibrating_[0] = vibrating_[1] = 0.0f;
   std::lock_guard<std::mutex> lock(mutex_);
   state_ = ControllerState{};
 }
 
-void Input::Sync(Context& xr) {
+void Input::Sync(Context& xr, XrTime displayTime) {
   if (!initialized_) return;
   XrActiveActionSet active{set_, XR_NULL_PATH};
   XrActionsSyncInfo syncInfo{XR_TYPE_ACTIONS_SYNC_INFO};
@@ -199,6 +217,16 @@ void Input::Sync(Context& xr) {
       if (XR_SUCCEEDED(getFloat_(xr.Session(), &get, &f)) && f.isActive) s.padPress[h] = f.currentState > 0.5f;
       get.action = menu_;
       if (XR_SUCCEEDED(getBool_(xr.Session(), &get, &b)) && b.isActive) s.menu[h] = b.currentState;
+      if (aimSpace_[h] != XR_NULL_HANDLE && xr.fn.LocateSpace) {
+        XrSpaceLocation location{XR_TYPE_SPACE_LOCATION};
+        constexpr XrSpaceLocationFlags kTracked =
+            XR_SPACE_LOCATION_POSITION_VALID_BIT | XR_SPACE_LOCATION_ORIENTATION_VALID_BIT;
+        if (XR_SUCCEEDED(xr.fn.LocateSpace(aimSpace_[h], xr.LocalSpace(), displayTime, &location)) &&
+            (location.locationFlags & kTracked) == kTracked) {
+          s.aimValid[h] = true;
+          s.aim[h] = location.pose;
+        }
+      }
     }
     s.active = any;
     if (any != loggedActive_) {

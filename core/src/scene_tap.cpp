@@ -51,6 +51,7 @@ IDirect3DBaseTexture9* g_sceneIdentity = nullptr;  // for recognising the copy d
 DrawObserver g_observer = nullptr;
 bool g_uiMirror = false;  // also draw redirected UI into the backbuffer
 thread_local bool t_inObserver = false;  // no re-entry while an observer adds draws
+thread_local int t_bypass = 0;           // the mod's own drawing (Bypass): hooks pass through
 
 IDirect3DTexture9* g_ui = nullptr;  // our render target (D3DPOOL_DEFAULT)
 IDirect3DSurface9* g_uiSurface = nullptr;
@@ -195,7 +196,7 @@ struct DrawScope {
 };
 
 HRESULT STDMETHODCALLTYPE HookSetRenderTarget(IDirect3DDevice9* self, DWORD index, IDirect3DSurface9* surface) {
-  if (g_enabled && index == 0) {
+  if (g_enabled && index == 0 && !t_bypass) {
     RefreshBackbuffer(self);
     g_targetIsBackbuffer = surface && surface == g_backbuffer;
     g_uiRedirected = false;  // the game binds its own target now
@@ -241,6 +242,7 @@ void MirrorUi(IDirect3DDevice9* device, DrawScope& scope, const DrawCall& call) 
 // Shared by the draw hooks: observer, the game's draw, UI mirror.
 template <typename Draw>
 HRESULT Dispatch(IDirect3DDevice9* device, const DrawCall& call, Draw&& draw) {
+  if (t_bypass) return draw();
   DrawScope scope(device);
   if (g_observer && Notify(device, scope, call)) return D3D_OK;
   const HRESULT hr = draw();
@@ -296,6 +298,8 @@ HRESULT STDMETHODCALLTYPE HookDrawIndexedPrimitiveUP(IDirect3DDevice9* self, D3D
 }  // namespace
 
 void Enable(bool enable) { g_enabled = enable; }
+Bypass::Bypass() { ++t_bypass; }
+Bypass::~Bypass() { --t_bypass; }
 void SetDrawObserver(DrawObserver observer) { g_observer = observer; }
 
 HRESULT DrawCall::Reissue(IDirect3DDevice9* device, const void* otherVertices) const {
@@ -320,6 +324,7 @@ HRESULT DrawPrimitiveUPDirect(IDirect3DDevice9* device, D3DPRIMITIVETYPE type, U
 }
 void EnableUiRedirect(bool enable) { g_uiEnabled = enable; }
 void EnableUiMirror(bool enable) { g_uiMirror = enable; }
+bool UiMirrorEnabled() { return g_uiMirror; }
 bool Enabled() { return g_enabled; }
 
 IDirect3DTexture9* Take() {

@@ -26,6 +26,7 @@ void EnableUiRedirect(bool enable);
 // (where the game put it), so the window still shows the UI.
 void EnableUiMirror(bool enable);
 bool Enabled();
+bool UiMirrorEnabled();
 
 // Presenting thread, before the original Present: textures recorded this
 // frame, AddRef'd (caller releases), or nullptr.
@@ -60,6 +61,17 @@ struct DrawCall {
 // observer issued everything itself and the game's draw is skipped. One observer.
 using DrawObserver = bool (*)(IDirect3DDevice9* device, const DrawCall& call);
 void SetDrawObserver(DrawObserver observer);
+
+// While alive, the calling thread's render-target changes and draws pass the
+// hooks untouched (no scene recording, UI redirect or observer): for the mod's
+// own drawing, e.g. an overlay rendered at Present.
+class Bypass {
+ public:
+  Bypass();
+  ~Bypass();
+  Bypass(const Bypass&) = delete;
+  Bypass& operator=(const Bypass&) = delete;
+};
 
 // Draws client-memory vertices bypassing the hooks (for observers adding draws).
 HRESULT DrawPrimitiveUPDirect(IDirect3DDevice9* device, D3DPRIMITIVETYPE type, UINT count, const void* vertices,

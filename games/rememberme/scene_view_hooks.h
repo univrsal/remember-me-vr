@@ -34,9 +34,23 @@ class SceneViewHooks {
   // (bOnLoadingScreen: the tips screen as on a monitor instead of the
   // half-streamed level) and menus (bMenuPause: the pause/Sensen menus' 3D
   // backdrop is made for the game's FOV). `name` is for the log.
-  void AddFlatFlag(const char* name, int32_t offset, uint32_t mask);
+  // `menu`: governed by FlatMenus, else by FlatLoadingScreens.
+  void AddFlatFlag(const char* name, int32_t offset, uint32_t mask, bool menu);
   bool FlatLoadingScreens() const;
   bool FlatMenus() const;
+
+  // Live settings for the config menu (any thread).
+  void SetFlatLoadingScreens(bool on);
+  void SetFlatMenus(bool on);
+  float WorldScale() const;  // Unreal units per metre
+  void SetWorldScale(float unitsPerMeter);
+  bool FullOrientation() const;  // [VR] CameraOrientation=full
+  void SetFullOrientation(bool full);
+  bool SymmetricProjection() const;
+  void SetSymmetricProjection(bool on);
+  bool SideBySide() const;
+  // Writes the settings above to the INI.
+  void Save(const vrcore::Config& config) const;
   int ToggleKey() const { return toggleKey_; }
 
  private:

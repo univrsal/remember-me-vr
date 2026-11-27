@@ -2,6 +2,7 @@
 
 #include <d3d9.h>
 
+#include <atomic>
 #include <cmath>
 #include <cstdint>
 #include <cstring>
@@ -46,6 +47,8 @@ struct GameCamera {
 
 bool g_enabled = true;
 bool g_installed = false;
+std::atomic<bool> g_hidden{false};  // hints off (config menu)
+uint64_t g_hiddenDraws = 0;
 
 // Game thread -> render thread: the last few frames' game cameras.
 constexpr int kCameraSlots = 8;
@@ -311,23 +314,40 @@ bool FindGameCamera(const float* leftView, GameCamera& out) {
 
 }  // namespace
 
-void Configure(const vrcore::Config& config) { g_enabled = config.GetBool("Stereo", "SensenStereo", true); }
+void Configure(const vrcore::Config& config) {
+  g_enabled = config.GetBool("Stereo", "SensenStereo", true);
+  g_hidden = config.GetBool("Visibility", "HideSensen", false);
+}
 bool Enabled() { return g_enabled; }
 
 void Install() {
-  if (!g_enabled || g_installed) return;
+  // Also with SensenStereo=0: hiding the hints goes through the same hook.
+  if (g_installed) return;
   if (!vrcore::scene_tap::Enabled()) {
     VR_LOG_WARN("sensen stereo needs [VR] StereoSource=scene (the draw hooks); off");
     return;
   }
   g_installed = true;
-  VR_LOG_INFO("sensen stereo: on");
+  VR_LOG_INFO("sensen stereo: %s", g_enabled ? "on" : "off (hook kept for hiding the hints)");
 }
 
-bool OnDraw(IDirect3DDevice9* device, const DrawCall& call) { return g_installed && HandleDraw(device, call); }
+bool OnDraw(IDirect3DDevice9* device, const DrawCall& call) {
+  if (!g_installed) return false;
+  // Hidden: skip the composite that blends the hint layer over the scene
+  // (mono and stereo); the layer itself is still drawn, just never shown.
+  if (g_hidden.load(std::memory_order_relaxed) && device_state::PixelShaderConstant("DNESensenParam1") >= 0) {
+    if (g_hiddenDraws++ == 0) VR_LOG_INFO("sensen: hints hidden (composite skipped)");
+    return true;
+  }
+  return g_enabled && HandleDraw(device, call);
+}
+
+void SetHidden(bool hidden) { g_hidden = hidden; }
+bool Hidden() { return g_hidden; }
+bool Available() { return g_installed; }
 
 void PushGameCamera(const float leftEyeView[16], const float gameView[16], const float gameProj[16]) {
-  if (!g_installed) return;
+  if (!g_installed || !g_enabled) return;
   std::lock_guard<std::mutex> lock(g_camerasMutex);
   GameCamera& c = g_cameras[g_nextCamera];
   g_nextCamera = (g_nextCamera + 1) % kCameraSlots;
@@ -338,7 +358,7 @@ void PushGameCamera(const float leftEyeView[16], const float gameView[16], const
 }
 
 void OnRendererViews(void* renderer) {
-  if (!g_installed) return;
+  if (!g_installed || !g_enabled) return;
   const auto base = reinterpret_cast<uintptr_t>(renderer);
   int32_t count = 0;
   uintptr_t data = 0;

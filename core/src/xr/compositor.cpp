@@ -1,6 +1,7 @@
 #include "vrcore/compositor.h"
 
 #include <algorithm>
+#include <cmath>
 
 #include "vrcore/log.h"
 
@@ -62,8 +63,15 @@ bool Compositor::PopStereoFrame(StereoFrame& out) {
   return true;
 }
 
-void Compositor::OnPresent(IDirect3DDevice9* device, IDirect3DTexture9* sceneTexture,
-                           IDirect3DTexture9* uiTexture) {
+bool Compositor::MenuPanel(XrPosef& pose, XrExtent2Df& size) const {
+  if (!menuAnchored_) return false;
+  pose = menuPose_;
+  size = menuSize_;
+  return true;
+}
+
+void Compositor::OnPresent(IDirect3DDevice9* device, IDirect3DTexture9* sceneTexture, IDirect3DTexture9* uiTexture,
+                           IDirect3DTexture9* menuTexture) {
   if (device != device_) {
     if (device_) {
       // The old device (and DXVK's VkDevice) may already be gone: abandon its
@@ -75,6 +83,8 @@ void Compositor::OnPresent(IDirect3DDevice9* device, IDirect3DTexture9* sceneTex
       stereoSwapchain_ = Swapchain{.name = "stereo"};
       screenSwapchain_ = Swapchain{.name = "screen"};
       uiSwapchain_ = Swapchain{.name = "ui"};
+      menuSwapchain_ = Swapchain{.name = "menu"};
+      menuAnchored_ = false;
       pool_ = VK_NULL_HANDLE;
       cmd_ = VK_NULL_HANDLE;
       fence_ = VK_NULL_HANDLE;
@@ -112,6 +122,7 @@ void Compositor::OnPresent(IDirect3DDevice9* device, IDirect3DTexture9* sceneTex
     if (down && !recenterKeyDown_) recenterPending_ = true;
     recenterKeyDown_ = down;
   }
+  if (recenterRequested_.exchange(false)) recenterPending_ = true;
 
   XrFrameWaitInfo waitInfo{XR_TYPE_FRAME_WAIT_INFO};
   XrFrameState frame{XR_TYPE_FRAME_STATE};
@@ -131,18 +142,21 @@ void Compositor::OnPresent(IDirect3DDevice9* device, IDirect3DTexture9* sceneTex
   if (recenterPending_) {
     xr_.Recenter(frame.predictedDisplayTime);
     recenterPending_ = false;
+    menuAnchored_ = false;  // the LOCAL space moved: place the menu again
   }
-  input_.Sync(xr_);
+  input_.Sync(xr_, frame.predictedDisplayTime);
+  if (!menuTexture) menuAnchored_ = false;
 
   StereoFrame stereo;
   const bool haveStereo = PopStereoFrame(stereo);
 
   XrCompositionLayerQuad quad{XR_TYPE_COMPOSITION_LAYER_QUAD};
   XrCompositionLayerQuad uiQuad{XR_TYPE_COMPOSITION_LAYER_QUAD};
+  XrCompositionLayerQuad menuQuad{XR_TYPE_COMPOSITION_LAYER_QUAD};
   XrCompositionLayerProjection projection{XR_TYPE_COMPOSITION_LAYER_PROJECTION};
   XrCompositionLayerProjectionView eyes[2] = {{XR_TYPE_COMPOSITION_LAYER_PROJECTION_VIEW},
                                               {XR_TYPE_COMPOSITION_LAYER_PROJECTION_VIEW}};
-  const XrCompositionLayerBaseHeader* layers[2] = {};
+  const XrCompositionLayerBaseHeader* layers[3] = {};
   uint32_t layerCount = 0;
 
   if (frame.shouldRender) {
@@ -232,6 +246,26 @@ void Compositor::OnPresent(IDirect3DDevice9* device, IDirect3DTexture9* sceneTex
       }
     }
     if (backbuffer) backbuffer->Release();
+
+    // Overlay menu on top of everything.
+    D3DSURFACE_DESC md{};
+    IDirect3DSurface9* menuSurface = nullptr;
+    if (layerCount && menuTexture && SUCCEEDED(menuTexture->GetLevelDesc(0, &md)) &&
+        SUCCEEDED(menuTexture->GetSurfaceLevel(0, &menuSurface)) && menuSurface &&
+        EnsureSwapchain(menuSwapchain_, md.Width, md.Height) &&
+        CopyToSwapchain(dxvk, menuSurface, true, menuSwapchain_, md.Width, md.Height)) {
+      menuSize_ = {settings_.menuWidth, settings_.menuWidth * static_cast<float>(md.Height) / static_cast<float>(md.Width)};
+      if (!menuAnchored_) AnchorMenu(frame.predictedDisplayTime);
+      menuQuad.layerFlags = XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT;
+      menuQuad.space = xr_.LocalSpace();
+      menuQuad.eyeVisibility = XR_EYE_VISIBILITY_BOTH;
+      menuQuad.subImage.swapchain = menuSwapchain_.handle;
+      menuQuad.subImage.imageRect = {{0, 0}, {static_cast<int32_t>(md.Width), static_cast<int32_t>(md.Height)}};
+      menuQuad.pose = menuPose_;
+      menuQuad.size = menuSize_;
+      layers[layerCount++] = reinterpret_cast<const XrCompositionLayerBaseHeader*>(&menuQuad);
+    }
+    if (menuSurface) menuSurface->Release();
   }
 
   XrFrameEndInfo endInfo{XR_TYPE_FRAME_END_INFO};
@@ -456,6 +490,30 @@ bool Compositor::CopyToSwapchain(const DxvkInterop& dxvk, IDirect3DSurface9* sou
 
 void Compositor::OnDeviceChanged() { DestroySwapchains(); }
 
+// In front of the head (yaw only, upright), menuDistance away, menuHeight
+// below eye height; facing the viewer.
+void Compositor::AnchorMenu(XrTime time) {
+  XrView views[2];
+  XrVector3f head{0.0f, 0.0f, 0.0f};
+  float yaw = 0.0f;
+  if (xr_.LocateEyes(time, views)) {
+    head = {(views[0].pose.position.x + views[1].pose.position.x) * 0.5f,
+            (views[0].pose.position.y + views[1].pose.position.y) * 0.5f,
+            (views[0].pose.position.z + views[1].pose.position.z) * 0.5f};
+    // Forward (-Z) rotated by the head orientation.
+    const XrQuaternionf& q = views[0].pose.orientation;
+    const float fx = -2.0f * (q.x * q.z + q.w * q.y);
+    const float fz = -(1.0f - 2.0f * (q.x * q.x + q.y * q.y));
+    if (fx * fx + fz * fz > 1e-6f) yaw = std::atan2(-fx, -fz);
+  }
+  menuPose_.orientation = {0.0f, std::sin(yaw * 0.5f), 0.0f, std::cos(yaw * 0.5f)};
+  menuPose_.position = {head.x - std::sin(yaw) * settings_.menuDistance, head.y + settings_.menuHeight,
+                        head.z - std::cos(yaw) * settings_.menuDistance};
+  menuAnchored_ = true;
+  VR_LOG_INFO("compositor: menu panel placed %.2f m ahead (yaw %.0f deg)", settings_.menuDistance,
+              yaw * 57.29578f);
+}
+
 void Compositor::DestroySwapchain(Swapchain& sc) {
   if (sc.handle != XR_NULL_HANDLE && xr_.fn.DestroySwapchain) xr_.fn.DestroySwapchain(sc.handle);
   sc.handle = XR_NULL_HANDLE;
@@ -467,6 +525,8 @@ void Compositor::DestroySwapchains() {
   DestroySwapchain(stereoSwapchain_);
   DestroySwapchain(screenSwapchain_);
   DestroySwapchain(uiSwapchain_);
+  DestroySwapchain(menuSwapchain_);
+  menuAnchored_ = false;
   sceneSourceLogged_ = -1;
 }
 
