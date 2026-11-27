@@ -15,6 +15,7 @@ add_library(vrcore OBJECT
   src/ue3/space.cpp
   src/ue3/types.cpp
   src/vk.cpp
+  src/vk_extensions.cpp
   src/xr/runtime_loader.cpp
   src/xr/compositor.cpp
   src/xr/xr_context.cpp

@@ -47,7 +47,9 @@ T ReadVA(uint32_t va) {
 // then incremented) in the game's device list. WM_DEVICECHANGE resets the
 // count to 0 and re-enumerates.
 constexpr uint32_t kEnumCallbackVA = 0x00C77850;
-constexpr uint8_t kEnumCallbackPrologue[] = {0x6A, 0xFF, 0x68, 0xB8, 0xCE, 0x1A, 0x01};
+// push -1; push <SEH handler>: the handler address (bytes 3..6) is relocated, so it's checked via FromPreferredVA.
+constexpr uint8_t kEnumCallbackPrologue[] = {0x6A, 0xFF, 0x68};
+constexpr uint32_t kEnumCallbackSehHandlerVA = 0x011ACEB8;
 constexpr uint32_t kIsXInputDeviceVA = 0x00C73700;
 constexpr uint8_t kIsXInputDevicePrologue[] = {0x81, 0xEC, 0x8C, 0x00, 0x00, 0x00, 0x53, 0x56, 0x33, 0xDB};
 constexpr uint32_t kXInputPadCountVA = 0x0166E4E4;
@@ -260,8 +262,12 @@ void InstallDeviceRegistration() {
   if (!g_enabled || !g_compositor || g_origIsXInputDevice) return;
   void* callback = vrcore::Exe().FromPreferredVA(kEnumCallbackVA);
   void* isXInput = vrcore::Exe().FromPreferredVA(kIsXInputDeviceVA);
+  const uint32_t sehHandler =
+      static_cast<uint32_t>(reinterpret_cast<uintptr_t>(vrcore::Exe().FromPreferredVA(kEnumCallbackSehHandlerVA)));
   if (!vrcore::mem::Matches(reinterpret_cast<uintptr_t>(callback), kEnumCallbackPrologue,
                             sizeof(kEnumCallbackPrologue)) ||
+      !vrcore::mem::Matches(reinterpret_cast<uintptr_t>(callback) + sizeof(kEnumCallbackPrologue),
+                            reinterpret_cast<const uint8_t*>(&sehHandler), sizeof(sehHandler)) ||
       !vrcore::mem::Matches(reinterpret_cast<uintptr_t>(isXInput), kIsXInputDevicePrologue,
                             sizeof(kIsXInputDevicePrologue))) {
     VR_LOG_WARN("vr gamepad: device enumeration code doesn't match this build; VR sticks need a real gamepad");

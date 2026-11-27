@@ -46,6 +46,7 @@ void Attach(HMODULE self) {
   }
 
   if (!hook::Init()) return;
+  InstallVulkanExtensionHooks();
   if (!InstallD3D9Hooks()) VR_LOG_ERROR("D3D9 hooks not installed; mod inactive");
   g_active = true;
   game.OnAttach(config, knownBuild);

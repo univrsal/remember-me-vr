@@ -1,5 +1,6 @@
 #include "vrcore/dxvk_interop.h"
 
+#include "internal.h"
 #include "vrcore/log.h"
 
 namespace vrcore {
@@ -45,6 +46,8 @@ void CaptureDxvkInstanceExtensions(IDirect3D9* d3d) {
   std::vector<const char*> names(count);
   if (count > 0 && SUCCEEDED(interop->GetInstanceExtensions(&count, names.data()))) {
     g_instanceExtensions.assign(names.begin(), names.begin() + count);
+    // DXVK reports only the extensions it asked for, not ones vk_extensions.cpp added.
+    for (const auto& added : AddedVulkanInstanceExtensions()) g_instanceExtensions.push_back(added);
     std::string list;
     for (const auto& name : g_instanceExtensions) list += name + " ";
     VR_LOG_DEBUG("DXVK instance extensions: %s", list.c_str());
