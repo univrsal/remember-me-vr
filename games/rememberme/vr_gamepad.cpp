@@ -73,6 +73,74 @@ std::string PlayerInputSticks() {
   return buf;
 }
 
+// --- Input trace (diagnostics) -------------------------------------------
+// FUN_00C75600 (thiscall on UWindowsViewport): processes one controller's
+// XInput state and calls the viewport client's InputKey (FViewportClient
+// vtable +0x14) / InputAxis (+0x1C). The client interface pointer is at
+// viewport+0x20.
+constexpr uint32_t kProcessControllerVA = 0x00C75600;
+constexpr uint8_t kProcessControllerPrologue[] = {0x6A, 0xFF, 0x68, 0x7A, 0xCD, 0x1A, 0x01};
+using ProcessControllerFn = int(__fastcall*)(void*, void*, uint32_t, int32_t, uint32_t, uint32_t, uint32_t, uint32_t,
+                                             uint32_t);
+using InputKeyFn = int(__fastcall*)(void*, void*, void*, int32_t, int32_t, int32_t, int32_t, float, int32_t);
+using InputAxisFn = int(__fastcall*)(void*, void*, void*, int32_t, int32_t, int32_t, float, float, int32_t);
+ProcessControllerFn g_origProcess = nullptr;
+InputKeyFn g_origInputKey = nullptr;
+InputAxisFn g_origInputAxis = nullptr;
+bool g_traceHooked = false;
+std::string (*g_nameOf)(int32_t) = nullptr;
+uint64_t g_nextAxisLogMs = 0;
+int g_keyLogs = 0;
+
+std::string KeyName(int32_t index, int32_t number) {
+  std::string n = g_nameOf ? g_nameOf(index) : std::string();
+  if (n.empty()) n = "#" + std::to_string(index);
+  if (number) n += "_" + std::to_string(number - 1);
+  return n;
+}
+
+int __fastcall HookInputKey(void* self, void* edx, void* viewport, int32_t controllerId, int32_t name, int32_t number,
+                            int32_t event, float amount, int32_t gamepad) {
+  const int r = g_origInputKey(self, edx, viewport, controllerId, name, number, event, amount, gamepad);
+  if (g_keyLogs < 400) {
+    ++g_keyLogs;
+    VR_LOG_INFO("input trace: key %s event %d controller %d gamepad %d -> %s", KeyName(name, number).c_str(), event,
+                controllerId, gamepad, r ? "consumed" : "not consumed");
+  }
+  return r;
+}
+
+int __fastcall HookInputAxis(void* self, void* edx, void* viewport, int32_t controllerId, int32_t name, int32_t number,
+                             float delta, float deltaTime, int32_t gamepad) {
+  const int r = g_origInputAxis(self, edx, viewport, controllerId, name, number, delta, deltaTime, gamepad);
+  const uint64_t now = GetTickCount64();
+  if (std::fabs(delta) > 0.25f && now >= g_nextAxisLogMs) {
+    g_nextAxisLogMs = now + 250;
+    VR_LOG_INFO("input trace: axis %s %.2f controller %d gamepad %d -> %s", KeyName(name, number).c_str(), delta,
+                controllerId, gamepad, r ? "consumed" : "not consumed");
+  }
+  return r;
+}
+
+int __fastcall HookProcessController(void* viewport, void* edx, uint32_t deltaTime, int32_t index, uint32_t s0,
+                                     uint32_t s1, uint32_t s2, uint32_t s3, uint32_t s4) {
+  if (!g_traceHooked) {
+    // First call: hook the viewport client's InputKey / InputAxis (shared
+    // vtable, so every call from the engine goes through them).
+    g_traceHooked = true;
+    void* client = nullptr;
+    vrcore::mem::Read(reinterpret_cast<uintptr_t>(viewport) + 0x20, client);
+    bool ok = false;
+    if (client) {
+      ok = vrcore::hook::InstallVTable("ViewportClient::InputKey", client, 0x14 / 4, &HookInputKey, &g_origInputKey) &&
+           vrcore::hook::InstallVTable("ViewportClient::InputAxis", client, 0x1C / 4, &HookInputAxis,
+                                       &g_origInputAxis);
+    }
+    VR_LOG_INFO("input trace: viewport client %p hooks %s", client, ok ? "installed" : "FAILED");
+  }
+  return g_origProcess(viewport, edx, deltaTime, index, s0, s1, s2, s3, s4);
+}
+
 // Diagnostics (sticks ignored without a real gamepad): the game's joystick
 // table, its "current" controller and the players' ControllerIds, logged when
 // they change (checked once a second).
@@ -265,6 +333,20 @@ void Install(bool early) {
                                         reinterpret_cast<void**>(&g_origSetState));
   VR_LOG_INFO("vr gamepad %s%s", ok ? "installed (VR controllers act as player 0's gamepad)" : "FAILED",
               early ? " at attach" : "");
+}
+
+void InstallInputTrace(std::string (*nameOf)(int32_t index)) {
+  g_nameOf = nameOf;
+  if (g_origProcess) return;
+  void* fn = vrcore::Exe().FromPreferredVA(kProcessControllerVA);
+  if (!vrcore::mem::Matches(reinterpret_cast<uintptr_t>(fn), kProcessControllerPrologue,
+                            sizeof(kProcessControllerPrologue))) {
+    VR_LOG_WARN("input trace: controller processing prologue doesn't match this build");
+    return;
+  }
+  const bool ok = vrcore::hook::Install("ProcessController", fn, reinterpret_cast<void*>(&HookProcessController),
+                                        reinterpret_cast<void**>(&g_origProcess));
+  VR_LOG_INFO("input trace %s", ok ? "installed" : "FAILED");
 }
 
 }  // namespace rm::vr_gamepad

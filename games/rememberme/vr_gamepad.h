@@ -3,6 +3,9 @@
 #include "vrcore/compositor.h"
 #include "vrcore/config.h"
 
+#include <cstdint>
+#include <string>
+
 namespace rm::vr_gamepad {
 
 // VR controllers as the game's gamepad: the game reads Xbox controllers through
@@ -18,6 +21,11 @@ namespace rm::vr_gamepad {
 //   right trackpad press -> Start, left trackpad press: centre -> Back,
 //   edges -> D-pad.
 void Configure(const vrcore::Config& config, vrcore::Compositor* compositor);
+// Diagnostics: hooks the engine's per-controller XInput processing
+// (FUN_00C75600) to log the stick axes and key events it hands to the
+// viewport client and whether the client consumed them. `nameOf` turns an
+// FName index into text. Known build only.
+void InstallInputTrace(std::string (*nameOf)(int32_t index));
 // early: from DllMain (xinput1_3 must already be loaded, no LoadLibrary);
 // otherwise loads it if needed. Installs once.
 void Install(bool early = false);

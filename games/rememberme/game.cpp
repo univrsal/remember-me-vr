@@ -84,6 +84,8 @@ class RememberMe final : public vrcore::Game {
     if (engineHooks_ && !engineHooksInstalled_) {
       if (knownBuild_) {
         engineHooksInstalled_ = sceneViews_.Install();
+        instance_ = this;
+        rm::vr_gamepad::InstallInputTrace(&NameOf);
         // Stereo fixes at the D3D9 level (right-eye view offset) and the
         // per-eye diagnostics that trace through the same hooks.
         if (engineHooksInstalled_ && (deviceState_.fixDneResolution || rm::renderer_hooks::DiagnosticEnabled() ||
@@ -194,6 +196,11 @@ class RememberMe final : public vrcore::Game {
   int ue3DumpKey_ = 0;
   bool dumpKeyDown_ = false;
   vrcore::ue3::Reflection reflection_;
+  static inline RememberMe* instance_ = nullptr;
+  // FName text for the input trace ("" until reflection is mapped).
+  static std::string NameOf(int32_t index) {
+    return instance_ && instance_->reflection_.Valid() ? instance_->reflection_.Name(index) : std::string();
+  }
   bool engineHooks_ = true;
   bool disableMotionBlur_ = true;
   bool motionBlurLogged_ = false;
