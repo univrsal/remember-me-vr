@@ -14,6 +14,7 @@
 #include "imgui_impl_dx9.h"
 #include "input_capture.h"
 #include "mirror.h"
+#include "mouse_unlock.h"
 #include "sensen_stereo.h"
 #include "vr_gamepad.h"
 #include "vrcore/log.h"
@@ -272,6 +273,7 @@ void Save() {
   bool ok = true;
   free_cam::Save(config);
   hide_actors::Save(config);
+  mouse_unlock::Save(config);
   config.SetBool("Visibility", "HideSensen", sensen_stereo::Hidden());
   if (g_targets.sceneViews) g_targets.sceneViews->Save(config);
   if (g_targets.disableMotionBlur) config.SetBool("VR", "DisableMotionBlur", g_targets.disableMotionBlur->load());
@@ -374,6 +376,11 @@ void VrTab() {
 }
 
 void DisplayTab() {
+  ImGui::BeginDisabled(!mouse_unlock::Available());
+  bool freeMouse = mouse_unlock::Enabled();
+  if (ImGui::Checkbox("Free the mouse cursor in game menus", &freeMouse)) mouse_unlock::SetEnabled(freeMouse);
+  Help("Pause, Sensen and main menu: show the cursor and let it leave the window.");
+  ImGui::EndDisabled();
   if (g_targets.disableMotionBlur) {
     bool off = g_targets.disableMotionBlur->load();
     if (ImGui::Checkbox("Disable motion blur", &off)) *g_targets.disableMotionBlur = off;

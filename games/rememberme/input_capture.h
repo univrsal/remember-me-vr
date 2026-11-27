@@ -15,7 +15,7 @@ namespace rm::input_capture {
 //  - gamepad: the XInputGetState hook gives the game a neutral pad
 //    (SwallowPad); the mod reads the real one with vr_gamepad::ReadPad.
 //  - keyboard/mouse: the viewport client's InputKey / InputAxis (vtable +0x14
-//    / +0x1C of the client at FViewport+0x20) swallow every event except key
+//    / +0x1C of the client at FViewport+0x1C) swallow every event except key
 //    releases (so held keys don't stick); mouse movement, buttons and wheel are
 //    recorded for the mod.
 // Also detects the menu toggle: [Menu] ToggleKey (F6) or the PadToggle combo

@@ -11,6 +11,7 @@
 #include "input_capture.h"
 #include "menu.h"
 #include "mirror.h"
+#include "mouse_unlock.h"
 #include "renderer_hooks.h"
 #include "scene_view_hooks.h"
 #include "sensen_stereo.h"
@@ -79,6 +80,7 @@ class RememberMe final : public vrcore::Game {
     rm::sensen_stereo::Configure(config);
     rm::draw_fixes::Configure(config);
     rm::hide_actors::Configure(config);
+    rm::mouse_unlock::Configure(config);
     rm::menu::Configure(config, {config, vrEnabled_ ? &compositor_ : nullptr, &sceneViews_, &disableMotionBlur_});
     deviceState_.fixDneResolution = config.GetBool("Stereo", "FixDNEResolution", true);
     VR_LOG_INFO("VR %s: mode %s, screen fallback %.1f m wide at %.1f m, recenter key 0x%02x",
@@ -99,6 +101,7 @@ class RememberMe final : public vrcore::Game {
       if (knownBuild_) {
         engineHooksInstalled_ = sceneViews_.Install();
         rm::vr_gamepad::InstallDeviceRegistration();
+        rm::mouse_unlock::Install();
         // Stereo fixes at the D3D9 level (right-eye view offset) and the
         // per-eye diagnostics that trace through the same hooks.
         if (engineHooksInstalled_ && (deviceState_.fixDneResolution || rm::renderer_hooks::DiagnosticEnabled() ||
@@ -127,6 +130,7 @@ class RememberMe final : public vrcore::Game {
           uint32_t mask = 0;
           if (reflection_.BoolProperty("Class ExampleGame.ExamplePlayerController", f.property, offset, mask)) {
             sceneViews_.AddFlatFlag(f.name, offset, mask, f.menu);
+            if (f.menu) rm::mouse_unlock::SetMenuFlag(offset, mask);
           } else {
             VR_LOG_WARN("ExamplePlayerController.%s not found; %ss stay stereo", f.property, f.name);
           }

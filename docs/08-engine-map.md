@@ -86,6 +86,8 @@ How the game reads Xbox controllers, and why the VR controllers have to be regis
 | DirectInput enumeration callback | `0x00C77850` | `stdcall(DIDEVICEINSTANCEW*, ref)`, `ret 8`. Called at `UWindowsClient` init (`0x00C7E050`) and on every `WM_DEVICECHANGE` (window proc `0x00C7B430`, which first resets the XInput pad count). XInput pads are registered in the input device list as pad number `0x0166E4E4` (< 5, then incremented) via `0x00ED1510`; other devices become DirectInput joysticks |
 | IsXInputDevice | `0x00C73700` | `cdecl(const GUID* guidProduct)`, the WMI `IG_` / VID / PID check from Microsoft's sample; **returns 0 for an XInput device** |
 | Input device list | `0x0166D138` | 16 entries of `0xAC` bytes (index = pad number + 1; keyboard/mouse is -1): connected byte, device types, name. Gameplay stick axes and triggers are only accepted (`InputAxis` returns consumed) for a controller registered here; buttons like A/B/X work regardless |
+| Viewport | — | `UWindowsViewport`: `+0x4` the `FViewport` the engine passes around (`CalcSceneView`'s argument, `InputKey`'s), `+0x20` the viewport client interface (= `FViewport+0x1C`), `+0x68` HWND |
+| Cursor | `0x00C73E60` / `0x00C73F60` / `0x00C741E0` | SetCursorVisible(`FViewport*`, visible), UpdateMouseLock(`UWindowsViewport*`, ClipCursor), UpdateMouseCursor(`FViewport*`, set). DirectInput mouse `*0x0166E498`, cooperative level 6 (non-exclusive, foreground) in `0x00C73590` |
 
 A controller that exists only at the XInput level (the VR controllers) is never enumerated by DirectInput, so its sticks are ignored until a real pad triggers a rescan. `PlayerInput.bUsingGamepad` (`+0xE4`, mask `0x1`) follows gamepad use but is not the gate. `WM_DEVICECHANGE` handling in `0x00F63850` only covers audio devices.
 

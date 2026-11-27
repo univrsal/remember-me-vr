@@ -32,8 +32,10 @@ std::atomic<bool> g_buttons[2]{{false}, {false}};
 // FViewportClient vtable: +0x14 InputKey(viewport, controllerId, FName key,
 // event, amount, bGamepad), +0x1C InputAxis(viewport, controllerId, FName key,
 // delta, deltaTime, bGamepad); both return UBOOL consumed. The client
-// interface pointer is at FViewport+0x20 (docs/08, "Gamepad input").
-constexpr uint32_t kViewportClient = 0x20;
+// interface pointer is at UWindowsViewport+0x20; the FViewport the engine
+// passes around (CalcSceneView's argument, InputKey's) is UWindowsViewport+4
+// (FUN_00C75600: viewport = this + 4), so the client is at FViewport+0x1C.
+constexpr uint32_t kViewportClient = 0x1C;
 constexpr int32_t kInputPressed = 0;   // EInputEvent IE_Pressed
 constexpr int32_t kInputReleased = 1;  // IE_Released
 using InputKeyFn = int(__fastcall*)(void*, void*, void*, int32_t, int32_t, int32_t, int32_t, float, int32_t);
@@ -132,9 +134,16 @@ void InstallInputHooks(void* viewport) {
   if (client) vrcore::mem::Read(client, vtable);
   const auto& exe = vrcore::Exe();
   const uintptr_t base = reinterpret_cast<uintptr_t>(exe.base);
-  if (!vtable || vtable < base || vtable >= base + exe.imageSize) {
-    VR_LOG_WARN("input capture: no viewport client at viewport %p (+0x20 = %p); the game keeps getting keyboard/mouse",
-                viewport, reinterpret_cast<void*>(client));
+  const auto inExe = [&](uintptr_t p) { return p >= base && p < base + exe.imageSize; };
+  uintptr_t inputKey = 0, inputAxis = 0;
+  if (vtable && inExe(vtable)) {
+    vrcore::mem::Read(vtable + 0x14, inputKey);
+    vrcore::mem::Read(vtable + 0x1C, inputAxis);
+  }
+  if (!inExe(inputKey) || !inExe(inputAxis)) {
+    VR_LOG_WARN("input capture: no viewport client at viewport %p (+0x1C = %p, vtable %p); the game keeps getting "
+                "keyboard/mouse",
+                viewport, reinterpret_cast<void*>(client), reinterpret_cast<void*>(vtable));
     return;
   }
   g_inputHooked = vrcore::hook::InstallVTable("ViewportClient::InputKey", reinterpret_cast<void*>(client), 0x14 / 4,

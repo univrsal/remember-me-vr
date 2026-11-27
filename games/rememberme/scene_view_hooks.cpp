@@ -12,6 +12,7 @@
 #include "free_cam.h"
 #include "hide_actors.h"
 #include "input_capture.h"
+#include "mouse_unlock.h"
 #include "sensen_stereo.h"
 #include "vrcore/hook.h"
 #include "vrcore/log.h"
@@ -304,6 +305,7 @@ void* CalcSceneView(void* self, void* family, FVector* loc, FRotator* rot, void*
   if (!matricesOnly) {
     g.vrFrame = vr;
     input_capture::InstallInputHooks(viewport);
+    mouse_unlock::Update(self, viewport);
     free_cam::Update(vr, vr && g.haveHead ? &g.head : nullptr);
   }
 
