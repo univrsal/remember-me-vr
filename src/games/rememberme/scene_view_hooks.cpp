@@ -95,6 +95,16 @@ struct State {
   bool haveLastLeft = false;
   EyeOverride lastLeft;
   uint64_t tempCalls = 0;
+
+  // One game camera per stereo frame: the game-camera capture and both eyes
+  // each call CalcSceneView, and each asks for the view point. The first
+  // answer is used for all of them, so the eyes can't disagree while the game
+  // camera moves (the game's calls still run).
+  bool sharedViewPointFrame = false;
+  bool haveSharedViewPoint = false;
+  FVector sharedLocation{};
+  FRotator sharedRotation{};
+  bool loggedViewPointDrift = false;
 };
 
 State g;
@@ -129,6 +139,27 @@ void __fastcall HookGetPlayerViewPoint(void* controller, void* /*edx*/, FVector*
   g_origGetPlayerViewPoint(controller, location, rotation);
   g.haveLookAtRotation = false;
   if (!location || !rotation) return;
+  if (g.sharedViewPointFrame && g.inCalcSceneView > 0) {
+    if (!g.haveSharedViewPoint) {
+      g.sharedLocation = *location;
+      g.sharedRotation = *rotation;
+      g.haveSharedViewPoint = true;
+    } else {
+      const FVector& a = g.sharedLocation;
+      const FRotator& r = g.sharedRotation;
+      if (!g.loggedViewPointDrift && (a.x != location->x || a.y != location->y || a.z != location->z ||
+                                      r.pitch != rotation->pitch || r.yaw != rotation->yaw ||
+                                      r.roll != rotation->roll)) {
+        g.loggedViewPointDrift = true;
+        VR_LOG_INFO("view point: the game's camera changed between calls in one frame (loc %.2f,%.2f,%.2f -> "
+                    "%.2f,%.2f,%.2f, rot %d,%d,%d -> %d,%d,%d); all views now use the frame's first",
+                    a.x, a.y, a.z, location->x, location->y, location->z, r.pitch, r.yaw, r.roll, rotation->pitch,
+                    rotation->yaw, rotation->roll);
+      }
+      *location = g.sharedLocation;
+      *rotation = g.sharedRotation;
+    }
+  }
   if (g.inCalcSceneView > 0 && !g.gameCameraCall && free_cam::Apply(location, rotation, g.vrFrame)) {
     g.lookAtRotation = {rotation->pitch, rotation->yaw, rotation->roll};
     g.haveLookAtRotation = true;
@@ -342,6 +373,8 @@ void* CalcSceneView(void* self, void* family, FVector* loc, FRotator* rot, void*
         right.fov = g.symmetricProjection ? Symmetric(g.testFov[1]) : g.testFov[1];
       }
     }
+    g.sharedViewPointFrame = true;
+    g.haveSharedViewPoint = false;
     // sensen_stereo re-projects the hints from the game camera per eye.
     const GameCamera gameCamera = CaptureGameCamera(self, family, viewport, drawer);
     view = CallEye(self, origin.x, half, viewState, left, family, loc, rot, viewport, drawer);
@@ -354,6 +387,7 @@ void* CalcSceneView(void* self, void* family, FVector* loc, FRotator* rot, void*
     PushGameCamera(gameCamera, view);
     rightView = CallEye(self, origin.x + half, half, RightEyeState(viewState), right, family, loc, rot, viewport,
                         drawer);
+    g.sharedViewPointFrame = false;
     // Everything after us (HUD, audio listener, ...) sees the normal player again.
     Field<FVector2D>(self, kLocalPlayerOrigin) = origin;
     Field<FVector2D>(self, kLocalPlayerSize) = size;
