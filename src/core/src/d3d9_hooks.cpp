@@ -82,6 +82,7 @@ void LogLetterbox(const RECT& r) {
 
 void NotifyPresent(IDirect3DDevice9* device, const char* via) {
   if (++g_presentCount == 1) VR_LOG_INFO("first Present (via %s)", via);
+  NoteHangWatchdogPresent();
   GetGame().OnPresent(device);
 }
 

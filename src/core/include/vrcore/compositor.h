@@ -125,6 +125,8 @@ class Compositor {
   xr::Input input_;
   vk::Functions vk_{};
   IDirect3DDevice9* device_ = nullptr;  // identity only, not ref-counted
+  // DXVK's interop device during OnPresent (for the queue lock), else null.
+  ID3D9VkInteropDevice* queueDevice_ = nullptr;
   VkDevice vkDevice_ = VK_NULL_HANDLE;
   VkCommandPool pool_ = VK_NULL_HANDLE;
   VkCommandBuffer cmd_ = VK_NULL_HANDLE;

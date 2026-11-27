@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 
+#include "../internal.h"
 #include "vrcore/log.h"
 
 namespace vrcore {
@@ -14,6 +15,27 @@ constexpr size_t kMaxQueuedFrames = 3;
 struct InteropGuard {
   DxvkInterop& interop;
   ~InteropGuard() { ReleaseDxvkInterop(interop); }
+};
+
+// Around an OpenXR call: names it for the hang watchdog and, with a device,
+// holds DXVK's submission lock. XR_KHR_vulkan_enable lets the runtime use the
+// VkQueue from the graphics binding inside xrBeginFrame, xrEndFrame and the
+// swapchain calls, and that queue is DXVK's: its submit thread must not use it
+// meanwhile. (SteamVR on Windows submits there; without the lock it hangs.)
+// Never hold it across waits on DXVK's own work (FlushRenderingCommands,
+// WaitForResource): those need DXVK's submit thread.
+struct XrCall {
+  ID3D9VkInteropDevice* device;
+  XrCall(const char* name, ID3D9VkInteropDevice* lockDevice) : device(lockDevice) {
+    detail::SetHangNote(name);
+    if (device) device->LockSubmissionQueue();
+  }
+  ~XrCall() {
+    if (device) device->ReleaseSubmissionQueue();
+    detail::SetHangNote(nullptr);
+  }
+  XrCall(const XrCall&) = delete;
+  XrCall& operator=(const XrCall&) = delete;
 };
 
 VkImageMemoryBarrier Barrier(VkImage image, VkImageLayout from, VkImageLayout to, VkAccessFlags srcAccess,
@@ -97,6 +119,11 @@ void Compositor::OnPresent(IDirect3DDevice9* device, IDirect3DTexture9* sceneTex
   DxvkInterop dxvk;
   if (!QueryDxvkInterop(device, dxvk, /*quiet=*/true)) return;
   InteropGuard guard{dxvk};
+  queueDevice_ = dxvk.device;
+  struct ClearQueueDevice {
+    ID3D9VkInteropDevice*& device;
+    ~ClearQueueDevice() { device = nullptr; }
+  } clearQueueDevice{queueDevice_};
 
   if (!EnsureInit(dxvk)) return;
   if (!xr_.PollEvents()) {
@@ -126,7 +153,11 @@ void Compositor::OnPresent(IDirect3DDevice9* device, IDirect3DTexture9* sceneTex
 
   XrFrameWaitInfo waitInfo{XR_TYPE_FRAME_WAIT_INFO};
   XrFrameState frame{XR_TYPE_FRAME_STATE};
-  XrResult result = xr_.fn.WaitFrame(xr_.Session(), &waitInfo, &frame);
+  XrResult result;
+  {
+    XrCall call("xrWaitFrame", nullptr);
+    result = xr_.fn.WaitFrame(xr_.Session(), &waitInfo, &frame);
+  }
   if (XR_FAILED(result)) {
     VR_LOG_ERROR("xr: xrWaitFrame failed: %s", xr::ResultName(result));
     return;
@@ -134,7 +165,10 @@ void Compositor::OnPresent(IDirect3DDevice9* device, IDirect3DTexture9* sceneTex
   lastDisplayTime_ = frame.predictedDisplayTime;
   displayPeriod_ = frame.predictedDisplayPeriod;
   XrFrameBeginInfo beginInfo{XR_TYPE_FRAME_BEGIN_INFO};
-  result = xr_.fn.BeginFrame(xr_.Session(), &beginInfo);
+  {
+    XrCall call("xrBeginFrame", queueDevice_);
+    result = xr_.fn.BeginFrame(xr_.Session(), &beginInfo);
+  }
   if (XR_FAILED(result)) {
     VR_LOG_ERROR("xr: xrBeginFrame failed: %s", xr::ResultName(result));
     return;
@@ -273,7 +307,10 @@ void Compositor::OnPresent(IDirect3DDevice9* device, IDirect3DTexture9* sceneTex
   endInfo.environmentBlendMode = XR_ENVIRONMENT_BLEND_MODE_OPAQUE;
   endInfo.layerCount = layerCount;
   endInfo.layers = layerCount ? layers : nullptr;
-  result = xr_.fn.EndFrame(xr_.Session(), &endInfo);
+  {
+    XrCall call("xrEndFrame", queueDevice_);
+    result = xr_.fn.EndFrame(xr_.Session(), &endInfo);
+  }
   if (XR_FAILED(result)) {
     VR_LOG_ERROR("xr: xrEndFrame failed: %s", xr::ResultName(result));
   } else if (layerCount && layers[0] == reinterpret_cast<const XrCompositionLayerBaseHeader*>(&projection)) {
@@ -373,7 +410,11 @@ bool Compositor::EnsureSwapchain(Swapchain& sc, uint32_t width, uint32_t height)
   info.faceCount = 1;
   info.arraySize = 1;
   info.mipCount = 1;
-  const XrResult result = xr_.fn.CreateSwapchain(xr_.Session(), &info, &sc.handle);
+  XrResult result;
+  {
+    XrCall call("xrCreateSwapchain", queueDevice_);
+    result = xr_.fn.CreateSwapchain(xr_.Session(), &info, &sc.handle);
+  }
   if (XR_FAILED(result)) {
     VR_LOG_ERROR("compositor: xrCreateSwapchain(%ux%u, format %d) failed: %s", width, height,
                  static_cast<int>(chosen->format), xr::ResultName(result));
@@ -415,10 +456,18 @@ bool Compositor::CopyToSwapchain(const DxvkInterop& dxvk, IDirect3DSurface9* sou
   XrSwapchainImageAcquireInfo acquire{XR_TYPE_SWAPCHAIN_IMAGE_ACQUIRE_INFO};
   XrSwapchainImageWaitInfo wait{XR_TYPE_SWAPCHAIN_IMAGE_WAIT_INFO};
   wait.timeout = XR_INFINITE_DURATION;
-  if (XR_FAILED(xr_.fn.AcquireSwapchainImage(sc.handle, &acquire, &index)) ||
-      XR_FAILED(xr_.fn.WaitSwapchainImage(sc.handle, &wait))) {
-    return false;
+  XrResult acquired;
+  {
+    XrCall call("xrAcquireSwapchainImage", queueDevice_);
+    acquired = xr_.fn.AcquireSwapchainImage(sc.handle, &acquire, &index);
   }
+  if (XR_FAILED(acquired)) return false;
+  XrResult waited;
+  {
+    XrCall call("xrWaitSwapchainImage", nullptr);
+    waited = xr_.fn.WaitSwapchainImage(sc.handle, &wait);
+  }
+  if (XR_FAILED(waited)) return false;
   const VkImage target = sc.images[index];
   const bool rawCopy = sc.rawCopy && sourceIsBgra8;
   const bool ok = [&] {
@@ -484,7 +533,10 @@ bool Compositor::CopyToSwapchain(const DxvkInterop& dxvk, IDirect3DSurface9* sou
   return true;
   }();
   XrSwapchainImageReleaseInfo release{XR_TYPE_SWAPCHAIN_IMAGE_RELEASE_INFO};
-  xr_.fn.ReleaseSwapchainImage(sc.handle, &release);
+  {
+    XrCall call("xrReleaseSwapchainImage", queueDevice_);
+    xr_.fn.ReleaseSwapchainImage(sc.handle, &release);
+  }
   return ok;
 }
 
@@ -515,7 +567,10 @@ void Compositor::AnchorMenu(XrTime time) {
 }
 
 void Compositor::DestroySwapchain(Swapchain& sc) {
-  if (sc.handle != XR_NULL_HANDLE && xr_.fn.DestroySwapchain) xr_.fn.DestroySwapchain(sc.handle);
+  if (sc.handle != XR_NULL_HANDLE && xr_.fn.DestroySwapchain) {
+    XrCall call("xrDestroySwapchain", queueDevice_);
+    xr_.fn.DestroySwapchain(sc.handle);
+  }
   sc.handle = XR_NULL_HANDLE;
   sc.images.clear();
   sc.width = sc.height = 0;
