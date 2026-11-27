@@ -91,6 +91,25 @@ How the game reads Xbox controllers, and why the VR controllers have to be regis
 
 A controller that exists only at the XInput level (the VR controllers) is never enumerated by DirectInput, so its sticks are ignored until a real pad triggers a rescan. `PlayerInput.bUsingGamepad` (`+0xE4`, mask `0x1`) follows gamepad use but is not the gate. `WM_DEVICECHANGE` handling in `0x00F63850` only covers audio devices.
 
+### Render size (`src/games/rememberme/render_size.cpp`)
+
+How the engine sizes its rendering, and how the mod decouples the VR resolution from the window:
+
+| What | VA | Notes |
+|---|---|---|
+| Gfx settings | `*0x01606BD8` | `ExampleAdriftGfxConfig.ini` values (read in `0x00D1D6F0`): `ResWinWidth +0x84`, `ResWinHeight +0x8C`, fullscreen sizes `+0x80`/`+0x88`, `SuperSampleCount +0x94` |
+| `FViewport::UpdateViewportRHI(bDestroyed, NewSizeX, NewSizeY, bFullscreen)` | `0x006CBA70` | `__thiscall` on the `FViewport` (`UWindowsViewport+0x4`), `ret 0x10`. DONTNOD's version sets `GSuperSampleCount` (`0x0162F18C`) from the settings, then **`SizeX/SizeY` (`+0x50/+0x54`) = NewSize × SuperSampleCount**, and creates (vtable `+0x1C`) or resizes (RHI `+0x128`) the RHI viewport with that. `bIsFullscreen` = `+0x5C` bit 0 |
+| `FViewport` vtable | `0x013FF6C0` | `+0x8`/`+0xC` `GetSizeX/Y` (return `+0x50`/`+0x54`), `+0x50` `GetMouseX`, `+0x54` `GetMouseY`, `+0x58` `GetMousePos`, `+0x64` `SetMouse`, `+0x6C` `IsFullscreen` |
+| D3D9 RHI device/backbuffer | `0x00C69420` | `D3DPRESENT_PARAMETERS.BackBufferWidth/Height` = largest viewport `SizeX/SizeY` **÷ GSuperSampleCount** |
+| Readers of `GSuperSampleCount` | 13 functions | all divide a viewport size by it to get backbuffer pixels: the canvas/UI viewport (`0x00994650`, `0x005670D0`), the Sensen composite (`0x00ECBF70`), `UGameViewportClient::Draw`, the RHI |
+| Window size | `0x00C73D70` | `SetWindowPos` from the viewport's `Resize`, separate from `UpdateViewportRHI` |
+| `WM_SIZE` handling | `0x00C745D0` | from the window proc (`0x00C7B430`, `WM_SIZE` restored/maximized): in game (`GIsGame`, `0x01604B0C`) resizes the viewport to the **configured** `ResWin*` size (not the client rect), unless fullscreen |
+| Mouse position | `0x00C743F0` / `0x00C74420` / `0x00C74450` / `0x00C74490` | `GetMouseX`, `GetMouseY`, `GetMousePos(POINT*)`: `GetCursorPos` + `ScreenToClient` (window `FViewport+0x64`); `SetMouse(x, y)`: `ClientToScreen` + `SetCursorPos`. `WM_MOUSEMOVE` carries no coordinates into the engine |
+
+So **everything follows `NewSize`**: scene buffers and view rects (`CalcSceneView` multiplies `GetSizeX/Y` by `LocalPlayer.Origin/Size`) at `NewSize × SS`, the UI and the backbuffer at `NewSize`. The window is sized on its own. With `[VR] RenderSize`, the mod's `UpdateViewportRHI` hook passes the VR size (÷ SS) instead of the window size (windowed only). The backbuffer then has the VR size, and `Present` scales it into the smaller window: vrcore passes a letterboxed destination rect (`Game::LetterboxPresent`). The four mouse functions are hooked to map client pixels to backbuffer pixels and back.
+
+Timing: the viewport, and with it the D3D9 device, is created on the main thread about 1.7 s after `Direct3DCreate9` (log). The game code is unpacked by then, so the hooks go in at the first `Direct3DCreate9` (`Game::OnDirect3DCreated`). For `RenderSize=auto` the eye size is read there through a temporary OpenXR instance (`xr::Context::ProbeRecommendedEyeSize`). If it isn't known until the compositor's session starts, or the hook missed the viewport's creation, the mod posts `WM_SIZE` to the game window: the game thread then re-runs its resize path through the hook (a device `Reset`).
+
 ### `ULocalPlayer::CalcSceneView` (`0x008622B0`)
 
 `__thiscall`, `this` = LocalPlayer. Arguments, as read from the decompile (**verify with a logging hook before relying on them**):

@@ -16,7 +16,8 @@ Values are Windows virtual-key codes (`0x77` = F8); `0` disables a key.
 ## Main `[VR]` options
 
 - `Mode`: `stereo` (default) or `screen` (the game on a flat virtual screen).
-- `StereoSource`: `scene` (the game's internal scene image, so stereo resolution = window size × `SuperSampleCount`; recommended) or `backbuffer`.
+- `RenderSize`, `RenderScale`: the resolution the game renders at in stereo, independent of the window (see [Resolution and window size](#resolution-and-window-size)).
+- `StereoSource`: `scene` (the game's internal scene image; recommended) or `backbuffer`.
 - `WorldScale`: Unreal units per metre of head movement. Larger = you feel smaller.
 - `CameraOrientation`: `yaw` keeps the horizon level (game camera pitch/roll ignored); `full` follows the game camera.
 - `UiPanel`, `UiDistance`, `UiWidth`, `UiHeight`: the game's UI (menus, HUD, subtitles) on its own floating panel in stereo.
@@ -38,22 +39,30 @@ The config menu (F6, or press both thumbsticks) edits most settings live and can
 
 `[Input] VRControllers=1` presents the VR controllers to the game as player 0's gamepad, merged with a real gamepad if one is connected: sticks (+click) = sticks, triggers = LT/RT, grips = LB/RB, right A/B = A/B, left A/B = X/Y, right trackpad press = Start, left trackpad press = Back (centre) or D-pad (edges). Touch controllers: menu = Start. `GripThreshold` sets how far a grip must be squeezed to count as LB/RB.
 
-## Window size
+## Resolution and window size
 
-In stereo mode the game window holds both eyes side by side, so the window size sets the eye resolution. The mod's log suggests a size for 1:1 pixels. The game ignores launch options for this; edit its graphics config instead:
+In stereo mode the game renders both eyes side by side at `[VR] RenderSize`, whatever the window size:
+
+- `auto` (default): the headset's recommended eye size (as OpenXR reports it, so SteamVR's resolution setting applies) × `RenderScale`. E.g. Index at 100%: 2 × 2016 × 2240 = 4032 × 2240.
+- `WIDTHxHEIGHT`, e.g. `4032x2240`: a fixed size for both eyes together.
+- `window`: the old behaviour, where the window size × `SuperSampleCount` is the render size.
+
+The window just shows that image scaled to fit (letterboxed), so pick any window size that fits your monitor. The mouse is mapped to match. If no headset is found when the game starts, it renders at the window size until the VR session starts, then switches.
+
+This needs windowed mode (fullscreen always renders at the display mode). The game ignores launch options for its window; edit its graphics config:
 
 - Linux: `~/.local/share/Steam/steamapps/compatdata/228300/pfx/drive_c/users/steamuser/Documents/My Games/UnrealEngine3/RememberMeGame/Config/ExampleAdriftGfxConfig.ini`
 - Windows: `Documents\My Games\UnrealEngine3\RememberMeGame\Config\ExampleAdriftGfxConfig.ini`
 
 ```ini
 [Rendering]
-ResWinWidth=2016
-ResWinHeight=2240
-SuperSampleCount=1    ; 2 = render at 2x width and 2x height, then downsample
+ResWinWidth=1600      ; any size; the VR resolution comes from RenderSize
+ResWinHeight=900
+SuperSampleCount=1    ; keep at 1 with RenderSize (2 would halve the UI resolution)
 Fullscreen=false
 ```
 
-The monitor limits the window size; for more pixels, use a smaller window with `SuperSampleCount=2`. The in-game graphics menu may rewrite this file. More in [05-toolchain.md](05-toolchain.md).
+The in-game graphics menu may rewrite this file. More in [05-toolchain.md](05-toolchain.md).
 
 ## Log
 

@@ -70,6 +70,7 @@ Each milestone reduces the risk of the next one. **Milestone 3 is the go/no-go g
 
 ## M4 — Usable mod
 
+- [ ] Render size independent of the window (built 2026-11-27, untested in game): `[VR] RenderSize=auto` renders at the headset's recommended size (× `RenderScale`) whatever the window size, through an `FViewport::UpdateViewportRHI` hook; the window shows the backbuffer letterboxed and the mouse is remapped (see 08, "Render size"). To check: the startup log (`render size hooks installed; 4032x2240 …`, then `render size: 4032x2240 (both eyes) instead of the …x… window`), main menu mouse hit-testing in a small window, letterboxing on DXVK (Linux and Windows), menus/loading screens/videos at the new aspect, and the late path (start the game before SteamVR: `resizing the game's viewport (headset eye size now known)`, a device `Reset`)
 - [ ] Bink FMV cinema mode; decide how to handle in-engine cutscenes (stereo with the camera locked, or a theatre view)
 - [ ] Comfort: no roll or shakes; world scale; recentre; INI config
 - [x] Motion blur off in VR (confirmed 2026-11-26, much smoother): `[VR] DisableMotionBlur=1` clears `GSystemSettings.bAllowMotionBlur` (`0x0162EE28 + 0x38`, found through the `[SystemSettings]` name table in `FUN_005F21F0`) every frame; `UberPostProcessEffect`'s proxy creation (`FUN_00641940`) checks it

@@ -8,6 +8,7 @@
 #include "vrcore/dxvk_interop.h"
 #include "vrcore/game.h"
 #include "vrcore/hook.h"
+#include "vrcore/letterbox.h"
 #include "vrcore/log.h"
 #include "vrcore/scene_tap.h"
 
@@ -41,6 +42,38 @@ SwapChainPresent_t g_origSwapChainPresent = nullptr;
 thread_local bool t_inPresent = false;
 uint64_t g_presentCount = 0;
 
+// Letterboxing (Game::LetterboxPresent): when the game presents its whole
+// backbuffer into a window of another aspect ratio, a destination rect that
+// fits it centred. False: present as the game asked.
+bool LetterboxRect(IDirect3DSwapChain9* swapchain, HWND wnd, RECT& out) {
+  if (!GetGame().LetterboxPresent()) return false;
+  D3DPRESENT_PARAMETERS pp{};
+  if (!swapchain || FAILED(swapchain->GetPresentParameters(&pp)) || !pp.Windowed) return false;
+  HWND window = wnd ? wnd : pp.hDeviceWindow;
+  if (!window) {
+    IDirect3DDevice9* device = nullptr;
+    D3DDEVICE_CREATION_PARAMETERS cp{};
+    if (SUCCEEDED(swapchain->GetDevice(&device)) && device) {
+      if (SUCCEEDED(device->GetCreationParameters(&cp))) window = cp.hFocusWindow;
+      device->Release();
+    }
+  }
+  RECT client{};
+  if (!window || !GetClientRect(window, &client) || client.right <= 0 || client.bottom <= 0) return false;
+  out = FitRect(static_cast<LONG>(pp.BackBufferWidth), static_cast<LONG>(pp.BackBufferHeight), client.right,
+                client.bottom);
+  // Already the whole client area: nothing to change.
+  return out.left != 0 || out.top != 0 || out.right != client.right || out.bottom != client.bottom;
+}
+
+void LogLetterbox(const RECT& r) {
+  static bool logged = false;
+  if (logged) return;
+  logged = true;
+  VR_LOG_INFO("present: backbuffer scaled to fit the window at (%ld,%ld) %ldx%ld (letterboxed)", r.left, r.top,
+              r.right - r.left, r.bottom - r.top);
+}
+
 void NotifyPresent(IDirect3DDevice9* device, const char* via) {
   if (++g_presentCount == 1) VR_LOG_INFO("first Present (via %s)", via);
   GetGame().OnPresent(device);
@@ -52,6 +85,17 @@ HRESULT STDMETHODCALLTYPE HookPresent(IDirect3DDevice9* self, const RECT* src, c
   t_inPresent = true;
   scene_tap::detail::BeforePresent(self);
   NotifyPresent(self, "IDirect3DDevice9::Present");
+  RECT fit{};
+  if (!src && !dst) {
+    IDirect3DSwapChain9* swapchain = nullptr;
+    if (SUCCEEDED(self->GetSwapChain(0, &swapchain)) && swapchain) {
+      if (LetterboxRect(swapchain, wnd, fit)) {
+        dst = &fit;
+        LogLetterbox(fit);
+      }
+      swapchain->Release();
+    }
+  }
   const HRESULT hr = g_origPresent(self, src, dst, wnd, dirty);
   scene_tap::detail::EndFrame();
   t_inPresent = false;
@@ -67,6 +111,11 @@ HRESULT STDMETHODCALLTYPE HookSwapChainPresent(IDirect3DSwapChain9* self, const 
     scene_tap::detail::BeforePresent(device);
     NotifyPresent(device, "IDirect3DSwapChain9::Present");
     device->Release();
+  }
+  RECT fit{};
+  if (!src && !dst && LetterboxRect(self, wnd, fit)) {
+    dst = &fit;
+    LogLetterbox(fit);
   }
   const HRESULT hr = g_origSwapChainPresent(self, src, dst, wnd, dirty, flags);
   scene_tap::detail::EndFrame();
@@ -130,6 +179,14 @@ HRESULT STDMETHODCALLTYPE HookCreateDevice(IDirect3D9* self, UINT adapter, D3DDE
   return hr;
 }
 
+// Once, for the first Direct3DCreate9(Ex).
+void NotifyDirect3DCreated() {
+  static bool notified = false;
+  if (notified) return;
+  notified = true;
+  GetGame().OnDirect3DCreated();
+}
+
 void HookDirect3D(IDirect3D9* d3d) {
   if (d3d && !g_origCreateDevice) {
     hook::InstallVTable("IDirect3D9::CreateDevice", d3d, kD3D9_CreateDevice, &HookCreateDevice,
@@ -141,13 +198,17 @@ IDirect3D9* WINAPI HookDirect3DCreate9(UINT sdkVersion) {
   IDirect3D9* d3d = g_origCreate9(sdkVersion);
   VR_LOG_INFO("Direct3DCreate9(%u) -> %p", sdkVersion, static_cast<void*>(d3d));
   HookDirect3D(d3d);
+  if (d3d) NotifyDirect3DCreated();
   return d3d;
 }
 
 HRESULT WINAPI HookDirect3DCreate9Ex(UINT sdkVersion, IDirect3D9Ex** out) {
   const HRESULT hr = g_origCreate9Ex(sdkVersion, out);
   VR_LOG_INFO("Direct3DCreate9Ex(%u) -> 0x%08lx (CreateDeviceEx is not hooked)", sdkVersion, hr);
-  if (SUCCEEDED(hr) && out) HookDirect3D(*out);
+  if (SUCCEEDED(hr) && out) {
+    HookDirect3D(*out);
+    NotifyDirect3DCreated();
+  }
   return hr;
 }
 

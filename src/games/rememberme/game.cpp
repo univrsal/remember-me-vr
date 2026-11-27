@@ -12,6 +12,7 @@
 #include "menu.h"
 #include "mirror.h"
 #include "mouse_unlock.h"
+#include "render_size.h"
 #include "renderer_hooks.h"
 #include "scene_view_hooks.h"
 #include "startup.h"
@@ -56,6 +57,11 @@ class RememberMe final : public vrcore::Game {
     vr.menuDistance = config.GetFloat("VR", "MenuDistance", vr.menuDistance);
     vr.menuWidth = config.GetFloat("VR", "MenuWidth", vr.menuWidth);
     vr.appName = "Remember Me VR";
+    // Render at the headset's resolution whatever the window size (stereo only;
+    // needs the engine hooks).
+    rm::render_size::Configure(config, vrEnabled_ && vr.mode == vrcore::Compositor::Mode::Stereo &&
+                                           config.GetBool("Stereo", "EngineHooks", true));
+    vr.windowSizeHint = !rm::render_size::Requested();
     compositor_.Configure(vr);
     // Stereo frames from the game's scene image (internal, e.g. supersampled,
     // resolution) instead of the window-sized backbuffer.
@@ -91,11 +97,17 @@ class RememberMe final : public vrcore::Game {
                 vr.screenWidth, vr.screenDistance, vr.recenterKey);
   }
 
+  // Before the game creates its viewport (and with it the D3D9 device).
+  void OnDirect3DCreated() override { rm::render_size::Install(knownBuild_); }
+
+  bool LetterboxPresent() const override { return rm::render_size::Managed(); }
+
   void OnDeviceCreated(IDirect3DDevice9* device, const D3DPRESENT_PARAMETERS& params,
                        const vrcore::DxvkInterop* dxvk) override {
     VR_LOG_INFO("game device: backbuffer %ux%u, %u buffer(s), swap effect %d, %s",
                 params.BackBufferWidth, params.BackBufferHeight, params.BackBufferCount, params.SwapEffect,
                 dxvk ? "DXVK interop available" : "no DXVK interop");
+    rm::render_size::OnDevice(params.hDeviceWindow, params.BackBufferWidth, params.BackBufferHeight);
     if (!dxvk) VR_LOG_WARN("VR output needs DXVK's d3d9.dll (Proton's default, or dxvk next to the exe on Windows)");
     rm::vr_gamepad::Install();
     rm::startup::InstallLate();
@@ -184,6 +196,7 @@ class RememberMe final : public vrcore::Game {
       IDirect3DTexture9* scene = vrcore::scene_tap::Take();
       IDirect3DTexture9* ui = vrcore::scene_tap::TakeUi();
       compositor_.OnPresent(device, scene, ui, menu);
+      rm::render_size::OnEyeSize(compositor_.EyeWidth(), compositor_.EyeHeight());
       if (scene) scene->Release();
       if (ui) ui->Release();
       // After the compositor copied the eyes (possibly from the backbuffer).

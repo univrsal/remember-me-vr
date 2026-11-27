@@ -322,7 +322,7 @@ bool Compositor::EnsureInit(const DxvkInterop& dxvk) {
   input_.Init(xr_);  // controller actions; failure only means no controller input
   eyeWidth_ = xr_.RecommendedEyeWidth();
   eyeHeight_ = xr_.RecommendedEyeHeight();
-  if (settings_.mode == Mode::Stereo) {
+  if (settings_.mode == Mode::Stereo && settings_.windowSizeHint) {
     VR_LOG_INFO("compositor: stereo mode; for 1:1 pixels set the game window to %ux%u (two eyes side by side)",
                 2 * eyeWidth_, eyeHeight_.load());
   }

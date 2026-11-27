@@ -52,7 +52,7 @@ VSync=false
 
 Notes:
 
-- **The physical screen limits the window size.** A requested 2016×2240 window came out at **1880×2090**, clamped to the monitor. To reach a larger render size, use a smaller window with `SuperSampleCount=2` (e.g. 1008×1120 → 2016×2240 scene). Once the mod runs, the window size no longer matters: we set the eye render size ourselves.
+- **The physical screen limits the window size.** A requested 2016×2240 window came out at **1880×2090**, clamped to the monitor. To reach a larger render size, use a smaller window with `SuperSampleCount=2` (e.g. 1008×1120 → 2016×2240 scene). With the mod, the window size no longer matters in stereo mode: `[VR] RenderSize` sets the render size (see [configuration.md](configuration.md#resolution-and-window-size)).
 - **The in-game graphics menu may rewrite this file.** Check it after changing settings in game.
 - **Untested: `GFXINI=` / `DEFGFXINI=`.** The exe also recognises these switches. They probably select an alternative graphics config, which would allow per-profile launch options (e.g. `%command% -GFXINI=VRBaseline.ini`). The path semantics (absolute, or relative to the config folder) are unknown.
 - `DXVK_HUD=fps,frametimes,gpuload` in launch options shows the actual backbuffer size and whether a run is GPU-bound.

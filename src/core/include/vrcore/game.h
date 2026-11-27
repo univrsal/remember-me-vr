@@ -28,6 +28,11 @@ class Game {
   // `knownBuild` is false when the exe's PE timestamp differs from knownTimestamp.
   virtual void OnAttach(const Config& config, bool knownBuild) { (void)config; (void)knownBuild; }
 
+  // Direct3DCreate9 was called (once, on the thread that called it). The
+  // game's code is unpacked by now, but its D3D9 device and (UE3) its
+  // viewport don't exist yet: the point to hook code that sizes them.
+  virtual void OnDirect3DCreated() {}
+
   // After IDirect3D9::CreateDevice succeeded. `dxvk` is null when not on DXVK.
   // By now the game's code is unpacked (SteamStub has run), so this is the
   // first safe point to hook game code.
@@ -41,6 +46,11 @@ class Game {
 
   // Before the frame is presented (device or swapchain Present).
   virtual void OnPresent(IDirect3DDevice9* device) { (void)device; }
+
+  // True: when the game presents its whole backbuffer into a window of a
+  // different aspect ratio, present it scaled to fit and centred
+  // (letterboxed) instead of stretched (see vrcore/letterbox.h).
+  virtual bool LetterboxPresent() const { return false; }
 
   virtual void OnDetach() {}
 };

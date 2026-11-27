@@ -47,6 +47,7 @@ class Compositor {
     float menuWidth = 1.0f;       // metres; height follows the menu texture aspect
     float menuHeight = -0.1f;     // vertical offset from eye height in metres
     int recenterKey = 0x77;       // virtual-key code (default F8); 0 = none
+    bool windowSizeHint = true;   // log a window size for 1:1 pixels (off when the game's render size is set directly)
     const char* appName = "vrcore";
   };
 

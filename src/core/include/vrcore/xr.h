@@ -46,6 +46,12 @@ class Context {
   void Shutdown();
   bool Initialized() const { return session_ != XR_NULL_HANDLE; }
 
+  // The headset's recommended per-eye image size, read through a temporary
+  // instance (no session, so no graphics device needed) that is destroyed
+  // again. For sizing the game's render targets before its device exists.
+  // False if no runtime/headset is available (logged).
+  static bool ProbeRecommendedEyeSize(const char* appName, uint32_t& width, uint32_t& height);
+
   // Drains the event queue and drives xrBeginSession/xrEndSession.
   // Returns false if the session was lost or the runtime is exiting; the caller
   // should Shutdown() and retry Init later.

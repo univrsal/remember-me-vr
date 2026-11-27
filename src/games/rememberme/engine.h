@@ -3,6 +3,8 @@
 // Remember Me engine addresses and layouts (Steam build, PE timestamp
 // 0x69d8a358). VAs are at the preferred base 0x00400000; see docs/08-engine-map.md.
 
+#include <windows.h>
+
 #include <cstdint>
 
 namespace rm {
@@ -78,6 +80,43 @@ constexpr uint8_t kAllocateViewStatePrologueB[] = {0x64, 0xA1, 0x00, 0x00, 0x00,
 // "MotionBlurPause" +0x3C, "DirectionalLightmaps" +0x34.
 constexpr uint32_t kSystemSettings = 0x0162EE28;
 constexpr uint32_t kSystemSettingsAllowMotionBlur = 0x38;
+
+// --- Render size (render_size.cpp; docs/08 "Render size") ---------------------
+// FViewport::UpdateViewportRHI(bDestroyed, NewSizeX, NewSizeY, bFullscreen),
+// __thiscall on the FViewport (UWindowsViewport+0x4), ret 0x10. DONTNOD's
+// version stores GSuperSampleCount = gfx settings SuperSampleCount, sets
+// SizeX/SizeY (+0x50/+0x54) = NewSize x SuperSampleCount, then creates/resizes
+// the RHI viewport with that; the D3D9 RHI makes the backbuffer SizeX/SS x
+// SizeY/SS (0x00C69420) and the UI/canvas code divides by SS too. Everything
+// (scene buffers, view rects, UI layout, backbuffer) follows NewSize; the
+// window is sized separately (SetWindowPos in 0x00C73D70).
+using UpdateViewportRhiFn = void(__attribute__((thiscall)) *)(void* viewport, int destroyed, uint32_t sizeX,
+                                                               uint32_t sizeY, int fullscreen);
+constexpr uint32_t kUpdateViewportRhi = 0x006CBA70;
+// Bytes 3..6 are a relocatable SEH handler address; check around them.
+constexpr uint8_t kUpdateViewportRhiPrologueA[] = {0x6A, 0xFF, 0x68};
+constexpr uint32_t kUpdateViewportRhiPrologueBOffset = 7;
+constexpr uint8_t kUpdateViewportRhiPrologueB[] = {0x64, 0xA1, 0x00, 0x00, 0x00, 0x00, 0x50, 0x83, 0xEC, 0x0C};
+// Gfx settings object (pointer): ResWinWidth +0x84, ResWinHeight +0x8C,
+// SuperSampleCount +0x94 (ExampleAdriftGfxConfig.ini, read in 0x00D1D6F0).
+constexpr uint32_t kGfxSettings = 0x01606BD8;
+constexpr uint32_t kGfxSettingsSuperSampleCount = 0x94;
+// FViewport (UWindowsViewport+0x4) +0x64: the window (UWindowsViewport+0x68).
+constexpr uint32_t kViewportWindow = 0x64;
+// UWindowsViewport mouse position, all __thiscall on the FViewport, in window
+// client pixels (GetCursorPos + ScreenToClient / ClientToScreen + SetCursorPos):
+// GetMouseX() / GetMouseY() -> LONG, GetMousePos(POINT*), SetMouse(x, y).
+using ViewportMouseAxisFn = LONG(__attribute__((thiscall)) *)(void* viewport);
+using ViewportMousePosFn = void(__attribute__((thiscall)) *)(void* viewport, POINT* out);
+using ViewportSetMouseFn = void(__attribute__((thiscall)) *)(void* viewport, LONG x, LONG y);
+constexpr uint32_t kViewportGetMouseX = 0x00C743F0;
+constexpr uint32_t kViewportGetMouseY = 0x00C74420;
+constexpr uint32_t kViewportGetMousePos = 0x00C74450;
+constexpr uint32_t kViewportSetMouse = 0x00C74490;
+// sub esp,8; push esi; lea eax,[esp+4]; push eax; mov esi,ecx (then call [GetCursorPos], relocated).
+constexpr uint8_t kViewportGetMousePrologue[] = {0x83, 0xEC, 0x08, 0x56, 0x8D, 0x44, 0x24, 0x04, 0x50, 0x8B, 0xF1};
+constexpr uint8_t kViewportSetMousePrologue[] = {0x8B, 0x44, 0x24, 0x04, 0x56, 0x8B, 0xF1, 0x8B, 0x56, 0x64,
+                                                 0x8B, 0x4C, 0x24, 0x0C, 0x57, 0x8D, 0xBE, 0xA8, 0x04, 0x00, 0x00};
 
 // ULocalPlayer fields.
 constexpr uint32_t kLocalPlayerActor = 0x40;      // PlayerController*

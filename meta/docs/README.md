@@ -6,7 +6,7 @@
 |---|---|
 | [installing-linux.md](installing-linux.md) | Linux / Proton / SteamVR install, step by step |
 | [installing-windows.md](installing-windows.md) | Windows install |
-| [configuration.md](configuration.md) | `RememberMeVR.ini` options, hotkeys, window size, log |
+| [configuration.md](configuration.md) | `RememberMeVR.ini` options, hotkeys, render resolution and window size, log |
 
 ## Working on the code
 

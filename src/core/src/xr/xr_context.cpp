@@ -64,6 +64,17 @@ bool Context::Init(const char* appName, const DxvkInterop& dxvk) {
   return true;
 }
 
+bool Context::ProbeRecommendedEyeSize(const char* appName, uint32_t& width, uint32_t& height) {
+  Context probe;
+  const bool ok = probe.CreateInstance(appName) && probe.eyeWidth_ > 0 && probe.eyeHeight_ > 0;
+  if (ok) {
+    width = probe.eyeWidth_;
+    height = probe.eyeHeight_;
+  }
+  probe.Shutdown();
+  return ok;
+}
+
 bool Context::CreateInstance(const char* appName) {
   getProcAddr_ = LoadRuntime();
   if (!getProcAddr_) return false;
