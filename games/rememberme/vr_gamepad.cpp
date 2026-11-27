@@ -5,11 +5,16 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
 #include <cstring>
 #include <mutex>
+#include <string>
 
+#include "engine.h"
 #include "vrcore/hook.h"
 #include "vrcore/log.h"
+#include "vrcore/memory.h"
+#include "vrcore/process.h"
 
 namespace rm::vr_gamepad {
 namespace {
@@ -26,6 +31,55 @@ bool g_loggedUse = false;
 bool g_loggedConnected = false;
 
 std::mutex g_mutex;  // XInput may be polled from more than one thread
+uint64_t g_nextDiagMs = 0;
+std::string g_lastDiag;
+
+template <typename T>
+T ReadVA(uint32_t va) {
+  T v{};
+  vrcore::mem::Read(reinterpret_cast<uintptr_t>(vrcore::Exe().FromPreferredVA(va)), v);
+  return v;
+}
+template <typename T>
+T ReadAt(uintptr_t address) {
+  T v{};
+  vrcore::mem::Read(address, v);
+  return v;
+}
+
+// Diagnostics (sticks ignored without a real gamepad): the game's joystick
+// table, its "current" controller and the players' ControllerIds, logged when
+// they change (checked once a second).
+void LogInputState() {
+  const uint64_t now = GetTickCount64();
+  if (now < g_nextDiagMs) return;
+  g_nextDiagMs = now + 1000;
+  char buf[96];
+  std::string text = "joysticks:";
+  const int32_t count = ReadVA<int32_t>(rm::kJoystickCount);
+  const uintptr_t table = ReadVA<uint32_t>(rm::kJoysticks);
+  for (int32_t i = 0; i < count && i < 8 && table; ++i) {
+    const uintptr_t e = table + static_cast<uintptr_t>(i) * rm::kJoystickStride;
+    std::snprintf(buf, sizeof(buf), " [%d dev=%08x id=%d conn=%d]", i, ReadAt<uint32_t>(e),
+                  ReadAt<int32_t>(e + rm::kJoystickId), ReadAt<int32_t>(e + rm::kJoystickConnected));
+    text += buf;
+  }
+  std::snprintf(buf, sizeof(buf), " (count %d) current=%d players:", count, ReadVA<int32_t>(rm::kCurrentController));
+  text += buf;
+  const uintptr_t engine = ReadVA<uint32_t>(rm::kGEngine);
+  const uintptr_t players = engine ? ReadAt<uint32_t>(engine + rm::kEngineGamePlayers) : 0;
+  const int32_t numPlayers = engine ? ReadAt<int32_t>(engine + rm::kEngineGamePlayers + 4) : 0;
+  for (int32_t i = 0; i < numPlayers && i < 4 && players; ++i) {
+    const uintptr_t player = ReadAt<uint32_t>(players + 4u * static_cast<uint32_t>(i));
+    std::snprintf(buf, sizeof(buf), " [%d controllerId=%d]", i,
+                  player ? ReadAt<int32_t>(player + rm::kLocalPlayerControllerId) : -1);
+    text += buf;
+  }
+  if (text != g_lastDiag) {
+    g_lastDiag = text;
+    VR_LOG_INFO("vr gamepad: %s", text.c_str());
+  }
+}
 XINPUT_GAMEPAD g_last{};
 DWORD g_packet = 0;
 bool g_grip[2] = {false, false};
@@ -94,6 +148,7 @@ void Merge(XINPUT_GAMEPAD& vr, const XINPUT_GAMEPAD& real) {
 
 DWORD WINAPI HookGetState(DWORD user, XINPUT_STATE* state) {
   const DWORD result = g_origGetState(user, state);
+  if (user == 0) LogInputState();
   if (!g_enabled || user != 0 || !state || !g_compositor) return result;
   const vrcore::xr::ControllerState controllers = g_compositor->Controllers();
   if (!controllers.active) {
