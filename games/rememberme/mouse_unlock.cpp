@@ -22,7 +22,10 @@ constexpr uint8_t kUpdateMouseLockPrologueA[] = {0x83, 0xEC, 0x28, 0xA1};
 constexpr uint8_t kUpdateMouseLockPrologueB[] = {0x33, 0xC4, 0x89, 0x44};
 constexpr uint32_t kUpdateMouseCursor = 0x00C741E0;
 constexpr uint8_t kUpdateMouseCursorPrologue[] = {0x53, 0x55, 0x56, 0x8B, 0xF1, 0x8B, 0x06, 0x8B, 0x90, 0xAC};
-constexpr uint32_t kControllerPawn = 0x264;  // Controller.Pawn
+constexpr uint32_t kControllerPawn = 0x264;     // Controller.Pawn
+constexpr uint32_t kActorWorldInfo = 0xD8;      // Actor.WorldInfo
+constexpr uint32_t kWorldInfoPauser = 0x498;    // WorldInfo.Pauser (non-null while paused)
+constexpr uint64_t kNoWorldMs = 300;            // no world frame for this long: a menu/video/loading screen
 
 using SetCursorVisibleFn = void(__fastcall*)(void*, void*, int32_t);
 using UpdateMouseLockFn = void(__fastcall*)(void*, void*);
@@ -35,8 +38,13 @@ std::atomic<bool> g_enabled{true};
 bool g_installed = false;
 int32_t g_menuOffset = -1;
 uint32_t g_menuMask = 0;
-std::atomic<bool> g_unlocked{false};
-int32_t g_gameVisible = 0;  // what the game last asked for (in game: hidden)
+
+// Game thread (CalcSceneView and the window/viewport code both run there).
+bool g_worldMenu = false;       // the world frame says: pause/Sensen menu, paused, or no pawn
+uint64_t g_lastWorldMs = 0;     // last main CalcSceneView (0: none yet, e.g. the main menu)
+bool g_applied = false;         // cursor currently freed by us
+int32_t g_gameVisible = 0;      // what the game last asked for (in game: hidden)
+unsigned g_lastSignals = ~0u;
 
 void ReleaseClip() {
   RECT clip{};
@@ -49,42 +57,84 @@ void ReleaseClip() {
   }
 }
 
+bool Want() {
+  if (!g_enabled.load(std::memory_order_relaxed) || input_capture::Capturing()) return false;
+  return g_worldMenu || g_lastWorldMs == 0 || GetTickCount64() - g_lastWorldMs > kNoWorldMs;
+}
+
+// Brings the cursor in line with Want(). `viewport` is the FViewport
+// (UWindowsViewport + 4). Game thread.
+void Apply(void* viewport) {
+  if (!g_origCursor) return;  // still installing (the hooks go live one by one)
+  const bool want = Want();
+  if (want == g_applied) {
+    if (want) ReleaseClip();
+    return;
+  }
+  g_applied = want;
+  if (want) {
+    g_origVisible(viewport, nullptr, 1);
+    ReleaseClip();
+    SetCursor(LoadCursorW(nullptr, IDC_ARROW));
+  } else {
+    g_origVisible(viewport, nullptr, g_gameVisible);
+    g_origLock(static_cast<char*>(viewport) - 4, nullptr);
+    g_origCursor(viewport, nullptr, 1);
+  }
+  VR_LOG_INFO("mouse %s", want ? "freed (game menu / no world on screen)" : "back to the game");
+}
+
 void __fastcall HookVisible(void* self, void* edx, int32_t visible) {
   g_gameVisible = visible;
-  g_origVisible(self, edx, g_unlocked.load(std::memory_order_relaxed) ? 1 : visible);
+  Apply(self);
+  g_origVisible(self, edx, g_applied ? 1 : visible);
 }
 
 void __fastcall HookLock(void* self, void* edx) {
-  if (g_unlocked.load(std::memory_order_relaxed)) {
-    ReleaseClip();
-    return;
-  }
+  Apply(static_cast<char*>(self) + 4);
+  if (g_applied) return;
   g_origLock(self, edx);
 }
 
 int32_t __fastcall HookCursor(void* self, void* edx, int32_t set) {
-  if (!g_unlocked.load(std::memory_order_relaxed)) return g_origCursor(self, edx, set);
+  Apply(self);
+  if (!g_applied) return g_origCursor(self, edx, set);
   if (set) SetCursor(LoadCursorW(nullptr, IDC_ARROW));
   return 1;
 }
 
-// The game shows a menu: the pause / Sensen menu flag, or no pawn (main menu).
-bool InMenu(void* localPlayer) {
-  uintptr_t controller = 0, pawn = 0;
+// The world frame's view of things: pause/Sensen menu flag, world paused, or
+// no pawn (main menu, between levels). Logs changes.
+bool WorldMenu(void* localPlayer) {
+  uintptr_t controller = 0;
   if (!vrcore::mem::Read(reinterpret_cast<uintptr_t>(localPlayer) + kLocalPlayerActor, controller) || !controller) {
     return false;
   }
   uint32_t word = 0;
-  if (g_menuOffset >= 0 && vrcore::mem::Read(controller + static_cast<uint32_t>(g_menuOffset), word) &&
-      (word & g_menuMask) != 0) {
-    return true;
+  uintptr_t pawn = 1, worldInfo = 0, pauser = 0;
+  const bool menuFlag = g_menuOffset >= 0 &&
+                        vrcore::mem::Read(controller + static_cast<uint32_t>(g_menuOffset), word) &&
+                        (word & g_menuMask) != 0;
+  vrcore::mem::Read(controller + kControllerPawn, pawn);
+  if (vrcore::mem::Read(controller + kActorWorldInfo, worldInfo) && worldInfo) {
+    vrcore::mem::Read(worldInfo + kWorldInfoPauser, pauser);
   }
-  return vrcore::mem::Read(controller + kControllerPawn, pawn) && pawn == 0;
+  const unsigned signals = (menuFlag ? 1u : 0u) | (pauser ? 2u : 0u) | (pawn == 0 ? 4u : 0u);
+  if (signals != g_lastSignals) {
+    g_lastSignals = signals;
+    VR_LOG_INFO("mouse unlock: menu flag %d, paused %d, no pawn %d", menuFlag ? 1 : 0, pauser ? 1 : 0,
+                pawn == 0 ? 1 : 0);
+  }
+  return signals != 0;
 }
 
 }  // namespace
 
 void Configure(const vrcore::Config& config) { g_enabled = config.GetBool("Input", "FreeMouseInMenus", true); }
+void Save(const vrcore::Config& config) { config.SetBool("Input", "FreeMouseInMenus", g_enabled); }
+bool Enabled() { return g_enabled; }
+void SetEnabled(bool enabled) { g_enabled = enabled; }
+bool Available() { return g_origCursor != nullptr; }
 
 void Install() {
   if (g_installed) return;
@@ -107,14 +157,9 @@ void Install() {
                                         reinterpret_cast<void**>(&g_origLock)) &&
                   vrcore::hook::Install("UpdateMouseCursor", cursor, reinterpret_cast<void*>(&HookCursor),
                                         reinterpret_cast<void**>(&g_origCursor));
-  if (!ok) g_origCursor = nullptr;  // Update stays off
+  if (!ok) g_origCursor = nullptr;
   VR_LOG_INFO("mouse unlock %s (cursor free in menus)", ok ? "installed" : "FAILED");
 }
-
-void Save(const vrcore::Config& config) { config.SetBool("Input", "FreeMouseInMenus", g_enabled); }
-bool Enabled() { return g_enabled; }
-void SetEnabled(bool enabled) { g_enabled = enabled; }
-bool Available() { return g_origCursor != nullptr; }
 
 void SetMenuFlag(int32_t offset, uint32_t mask) {
   g_menuOffset = offset;
@@ -123,21 +168,9 @@ void SetMenuFlag(int32_t offset, uint32_t mask) {
 
 void Update(void* localPlayer, void* viewport) {
   if (!g_origCursor || !viewport) return;
-  const bool want = g_enabled.load() && InMenu(localPlayer) && !input_capture::Capturing();
-  if (want == g_unlocked.load()) return;
-  g_unlocked = want;
-  void* const windowsViewport = static_cast<char*>(viewport) - 4;
-  // Apply now (the game only updates these on its own changes).
-  if (want) {
-    g_origVisible(viewport, nullptr, 1);
-    ReleaseClip();
-    g_origCursor(viewport, nullptr, 1);
-  } else {
-    g_origVisible(viewport, nullptr, g_gameVisible);
-    g_origLock(windowsViewport, nullptr);
-    g_origCursor(viewport, nullptr, 1);
-  }
-  VR_LOG_INFO("mouse %s", want ? "freed (game menu)" : "back to the game");
+  g_lastWorldMs = GetTickCount64();
+  g_worldMenu = WorldMenu(localPlayer);
+  Apply(viewport);
 }
 
 }  // namespace rm::mouse_unlock

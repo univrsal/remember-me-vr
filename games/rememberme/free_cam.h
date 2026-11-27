@@ -27,7 +27,7 @@ struct Settings {
   float fastMultiplier = 4.0f;
   float slowMultiplier = 0.25f;
   float lookSpeed = 120.0f;       // deg/s at full stick
-  float mouseSensitivity = 0.1f;  // deg per mouse count
+  float mouseSensitivity = 0.45f;  // deg per mouse count
   bool invertMouseY = false;
   float deadzone = 0.2f;
 };

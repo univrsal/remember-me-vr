@@ -26,9 +26,9 @@ namespace {
 
 constexpr UINT kWidth = 1280;  // menu texture (VR panel aspect follows it)
 constexpr UINT kHeight = 960;
-constexpr float kMouseSpeed = 1.0f;  // cursor pixels per mouse count
 
 Targets g_targets;
+float g_cursorSpeed = 4.5f;  // [Menu] CursorSpeed: menu pixels per mouse count
 bool g_imguiReady = false;
 bool g_backendReady = false;
 IDirect3DDevice9* g_device = nullptr;  // identity only
@@ -181,8 +181,8 @@ void KeyEdge(ImGuiIO& io, int slot, bool down, ImGuiKey key) {
 
 void FeedInput(ImGuiIO& io) {
   const float dx = input_capture::TakeMouseX(), dy = input_capture::TakeMouseY();
-  g_cursor.x = std::clamp(g_cursor.x + dx * kMouseSpeed, 0.0f, static_cast<float>(kWidth - 1));
-  g_cursor.y = std::clamp(g_cursor.y - dy * kMouseSpeed, 0.0f, static_cast<float>(kHeight - 1));  // MouseY: up = +
+  g_cursor.x = std::clamp(g_cursor.x + dx * g_cursorSpeed, 0.0f, static_cast<float>(kWidth - 1));
+  g_cursor.y = std::clamp(g_cursor.y - dy * g_cursorSpeed, 0.0f, static_cast<float>(kHeight - 1));  // MouseY: up = +
   bool click = input_capture::MouseButton(0);
   float wheel = input_capture::TakeWheel();
 
@@ -274,6 +274,7 @@ void Save() {
   free_cam::Save(config);
   hide_actors::Save(config);
   mouse_unlock::Save(config);
+  config.SetFloat("Menu", "CursorSpeed", g_cursorSpeed);
   config.SetBool("Visibility", "HideSensen", sensen_stereo::Hidden());
   if (g_targets.sceneViews) g_targets.sceneViews->Save(config);
   if (g_targets.disableMotionBlur) config.SetBool("VR", "DisableMotionBlur", g_targets.disableMotionBlur->load());
@@ -381,6 +382,7 @@ void DisplayTab() {
   if (ImGui::Checkbox("Free the mouse cursor in game menus", &freeMouse)) mouse_unlock::SetEnabled(freeMouse);
   Help("Pause, Sensen and main menu: show the cursor and let it leave the window.");
   ImGui::EndDisabled();
+  ImGui::SliderFloat("Menu cursor speed", &g_cursorSpeed, 0.5f, 15.0f, "%.1f");
   if (g_targets.disableMotionBlur) {
     bool off = g_targets.disableMotionBlur->load();
     if (ImGui::Checkbox("Disable motion blur", &off)) *g_targets.disableMotionBlur = off;
@@ -463,6 +465,7 @@ void Configure(const vrcore::Config& config, const Targets& targets) {
   g_targets = targets;
   g_targets.config = config;
   g_dumpPending = config.GetBool("Debug", "DumpMenu", false);
+  g_cursorSpeed = config.GetFloat("Menu", "CursorSpeed", g_cursorSpeed);
   g_selectTab = config.GetInt("Debug", "DumpMenuTab", -1);
 }
 
